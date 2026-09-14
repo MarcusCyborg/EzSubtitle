@@ -1,0 +1,39 @@
+{
+  "name": "ezsubtitle",
+  "description": "Lấy phụ đề YouTube và chuẩn bị bản tóm tắt trên ChatGPT.",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "compile": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "postinstall": "wxt prepare"
+  },
+  "dependencies": {
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@eslint/js": "^9.39.1",
+    "@types/chrome": "^0.1.36",
+    "@wxt-dev/module-react": "^1.1.5",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
+    "jsdom": "^27.3.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.48.1",
+    "vitest": "^4.0.16",
+    "web-ext": "^10.5.0",
+    "wxt": "^0.21.3"
+  }
+}

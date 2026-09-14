@@ -1,0 +1,7 @@
+{
+  "events": [
+    { "tStartMs": 3200, "segs": [{ "utf8": "Hello " }, { "utf8": "&amp; welcome." }] },
+    { "tStartMs": 67400, "segs": [{ "utf8": "Next point." }] },
+    { "tStartMs": 70000, "segs": [{ "utf8": "" }] }
+  ]
+}

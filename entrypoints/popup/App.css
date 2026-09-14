@@ -1,0 +1,31 @@
+:root { color: #1e2a36; background: #f5f1e8; font-family: "Trebuchet MS", "Segoe UI", sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 440px; }
+button, select, textarea { font: inherit; }
+.popup-shell { min-height: 410px; padding: 18px; background: radial-gradient(circle at 96% 2%, #ffe5a1 0, transparent 29%), linear-gradient(145deg, #fcfaf4, #f1efe8); }
+.popup-header { display: flex; gap: 11px; align-items: center; margin-bottom: 17px; }
+.brand-mark { display: grid; width: 37px; height: 37px; place-items: center; border-radius: 11px; background: #d99a18; color: #fffdf6; font: 700 23px Georgia, serif; box-shadow: 3px 3px 0 #324554; }
+h1 { margin: 0; color: #22313f; font: 700 21px Georgia, serif; letter-spacing: -.4px; }
+.popup-header p { margin: 2px 0 0; color: #66727c; font-size: 12px; }
+.status-message { display: flex; gap: 9px; align-items: center; padding: 11px 12px; border-radius: 10px; font-size: 13px; line-height: 1.4; }
+.status-message--loading { background: #e8f0ee; color: #214d49; }
+.status-message--error { background: #fff0ec; color: #8a3426; }
+.status-message--info { margin-top: 10px; background: #eff4ea; color: #3b5c3e; }
+.spinner { width: 14px; height: 14px; flex: 0 0 auto; border: 2px solid #82a29f; border-top-color: #214d49; border-radius: 50%; animation: spin .85s linear infinite; }
+@keyframes spin { to { transform: rotate(1turn); } }
+.workspace { display: grid; gap: 12px; }
+.track-selector, .output-selector { display: grid; gap: 5px; color: #53616a; font-size: 12px; font-weight: 700; }
+.track-selector select, .output-selector select { width: 100%; padding: 9px 10px; border: 1px solid #cad1cd; border-radius: 8px; color: #26343d; background: #fffefa; }
+.transcript-preview { overflow: hidden; border: 1px solid #d6d9d1; border-radius: 10px; background: #fffefa; }
+.transcript-preview__meta { display: flex; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid #e3e4dd; color: #68746f; font-size: 11px; }
+.transcript-preview textarea { display: block; width: 100%; height: 190px; resize: vertical; border: 0; outline: 0; padding: 10px; color: #27343c; background: transparent; font: 12px/1.58 "Courier New", monospace; white-space: pre-wrap; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.actions .button--primary { grid-column: 1 / -1; }
+.button { min-height: 35px; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700; transition: transform .15s ease, background .15s ease; }
+.button:hover { transform: translateY(-1px); }
+.button:focus-visible, select:focus-visible { outline: 3px solid #f3ca6c; outline-offset: 2px; }
+.button--primary { color: #fffdf9; background: #2e5d58; box-shadow: inset 0 -2px 0 rgba(0,0,0,.16); }
+.button--primary:hover { background: #244c48; }
+.button--secondary { color: #31424c; border-color: #bec8c5; background: #fffefa; }
+.error-state { display: grid; gap: 11px; }
+footer { margin-top: 15px; color: #74807d; font-size: 10px; line-height: 1.4; }

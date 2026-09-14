@@ -1,0 +1,46 @@
+{
+  "actions": [
+    {
+      "updateEngagementPanelAction": {
+        "content": {
+          "transcriptRenderer": {
+            "content": {
+              "transcriptSearchPanelRenderer": {
+                "body": {
+                  "transcriptSegmentListRenderer": {
+                    "initialSegments": [
+                      {
+                        "transcriptSegmentRenderer": {
+                          "startMs": "7000",
+                          "snippet": {
+                            "runs": [
+                              { "text": "In July of 2025, " },
+                              { "text": "top athletes competed..." }
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "transcriptCueGroupRenderer": {
+                          "startOffsetMs": "33000",
+                          "cueGroups": [
+                            {
+                              "transcriptCueRenderer": {
+                                "startOffsetMs": "33000",
+                                "cue": { "simpleText": "This might sound a little daunting..." }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
