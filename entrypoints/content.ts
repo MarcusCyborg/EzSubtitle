@@ -227,6 +227,12 @@ async function fetchPageTranscript(videoId: string, track: CaptionTrack, trackCo
   }
   if (endpointError.code === 'STALE_VIDEO') return failure(endpointError.code, endpointError.message);
 
+  if (trackCount === 1) {
+    const visibleSegments = await readVisibleSingleTrackTranscript(videoId);
+    if (parseVideoId(window.location.href) !== videoId) return failure('STALE_VIDEO', 'Video đã thay đổi khi transcript đang tải.');
+    if (visibleSegments) return transcriptResult(visibleSegments);
+  }
+
   const native = await requestPageBridge('FETCH_NATIVE_TRANSCRIPT', {
     videoId,
     track: { id: track.id, languageCode: track.languageCode, label: track.label },
@@ -238,11 +244,6 @@ async function fetchPageTranscript(videoId: string, track: CaptionTrack, trackCo
   }
   const nativeError = bridgeFailure(native);
   if (nativeError.code === 'STALE_VIDEO') return failure(nativeError.code, nativeError.message);
-  if (trackCount === 1 && nativeError.code !== 'NATIVE_TRANSCRIPT_UNSTABLE') {
-    const segments = await readVisibleSingleTrackTranscript(videoId);
-    if (parseVideoId(window.location.href) !== videoId) return failure('STALE_VIDEO', 'Video đã thay đổi khi transcript đang tải.');
-    if (segments) return transcriptResult(segments);
-  }
   const missingTimestamp = [timedTextError, endpointError].find((error) => error?.code === 'MISSING_TIMESTAMP');
   if (missingTimestamp) return failure(missingTimestamp.code, missingTimestamp.message);
   const preferredError = endpointError.code === 'TRANSCRIPT_ENDPOINT_UNAVAILABLE' ? nativeError : endpointError;

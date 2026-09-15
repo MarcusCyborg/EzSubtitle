@@ -41,6 +41,12 @@ export function nativeTranscriptTab(root: ParentNode): HTMLElement | null {
   )) ?? null;
 }
 
+export function nativeSelectedTab(root: ParentNode): HTMLElement | null {
+  return Array.from(root.querySelectorAll<HTMLElement>('[role="tab"], yt-chip-cloud-chip-renderer')).find((element) => (
+    element.getAttribute('aria-selected') === 'true' || element.hasAttribute('selected')
+  )) ?? null;
+}
+
 export type NativeTranscriptMenuEntry = {
   title: string;
   selected: boolean;

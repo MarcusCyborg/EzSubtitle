@@ -218,13 +218,21 @@ describe('MAIN-world transcript fallback', () => {
     document.body.insertAdjacentHTML('beforeend', readFileSync(resolve('tests/fixtures/native-timeline.html'), 'utf8'));
     const panel = document.querySelector<HTMLElement>('[target-id="engagement-panel-search-in-video"]')!;
     const content = panel.querySelector<HTMLElement>('.transcript-content')!;
+    const chapterTab = panel.querySelector<HTMLElement>('[role="tab"]:first-child')!;
     const tab = panel.querySelector<HTMLElement>('[role="tab"]:last-child')!;
     if (chaptersSelected) {
       content.hidden = true;
+      chapterTab.setAttribute('aria-selected', 'true');
       tab.setAttribute('aria-selected', 'false');
       tab.addEventListener('click', () => {
         content.hidden = false;
+        chapterTab.setAttribute('aria-selected', 'false');
         tab.setAttribute('aria-selected', 'true');
+      });
+      chapterTab.addEventListener('click', () => {
+        content.hidden = true;
+        chapterTab.setAttribute('aria-selected', 'true');
+        tab.setAttribute('aria-selected', 'false');
       });
     }
     const pending = handlePageRequest(
@@ -240,6 +248,8 @@ describe('MAIN-world transcript fallback', () => {
       ] },
     });
     expect(panel.getAttribute('visibility')).toBe('ENGAGEMENT_PANEL_VISIBILITY_EXPANDED');
+    expect(chapterTab.getAttribute('aria-selected')).toBe(chaptersSelected ? 'true' : 'false');
+    expect(content.hidden).toBe(chaptersSelected);
   });
 
   it('prefers the current player API and refuses a stale global player response', async () => {
@@ -333,6 +343,7 @@ describe('MAIN-world transcript fallback', () => {
 
   it('lets YouTube switch its native language menu and reads exact renderer startMs', async () => {
     const { panel, closeButton } = installNativeTranscriptFixture();
+    const menu = panel.querySelector('yt-dropdown-menu') as HTMLElement & { selected?: number };
     const closeSpy = vi.spyOn(closeButton, 'click');
 
     const english = await handlePageRequest(
@@ -346,6 +357,7 @@ describe('MAIN-world transcript fallback', () => {
 
     expect(english).toMatchObject({ ok: true, data: { segments: [{ startMs: 6_878, text: 'In July of 2025,' }] } });
     expect(vietnamese).toMatchObject({ ok: true, data: { segments: [{ startMs: 6_878, text: 'Vào tháng 7 năm 2025,' }] } });
+    expect(menu.selected).toBe(0);
     expect(panel.getAttribute('visibility')).toBe('ENGAGEMENT_PANEL_VISIBILITY_HIDDEN');
     expect(closeSpy).toHaveBeenCalledTimes(2);
   });

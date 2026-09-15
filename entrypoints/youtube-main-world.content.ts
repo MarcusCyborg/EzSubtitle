@@ -4,6 +4,7 @@ import {
   inspectNativeTranscript,
   findNativeTranscriptPanel,
   nativePanelIsExpanded,
+  nativeSelectedTab,
   nativeTranscriptTab,
   NATIVE_TRANSCRIPT_PANEL_SELECTOR,
   nativeInspectionSignature,
@@ -305,11 +306,17 @@ function waitForStableNativeTranscript(
   });
 }
 
-async function openNativeTranscript(signal: AbortSignal): Promise<{ panel: HTMLElement; wasExpanded: boolean; concealment: HTMLStyleElement | null }> {
+async function openNativeTranscript(signal: AbortSignal): Promise<{
+  panel: HTMLElement;
+  wasExpanded: boolean;
+  concealment: HTMLStyleElement | null;
+  restoreTab: HTMLElement | null;
+}> {
   const existing = transcriptPanel();
   if (panelIsExpanded(existing)) {
+    const restoreTab = nativeSelectedTab(existing);
     if (!inspectNativeTranscript(existing).hasText) nativeTranscriptTab(existing)?.click();
-    return { panel: existing, wasExpanded: true, concealment: null };
+    return { panel: existing, wasExpanded: true, concealment: null, restoreTab };
   }
 
   const button = transcriptOpenButton();
@@ -324,12 +331,28 @@ async function openNativeTranscript(signal: AbortSignal): Promise<{ panel: HTMLE
       const candidate = transcriptPanel();
       return panelIsExpanded(candidate) ? candidate : null;
     }, signal);
+    const restoreTab = nativeSelectedTab(panel);
     if (!inspectNativeTranscript(panel).hasText) nativeTranscriptTab(panel)?.click();
-    return { panel, wasExpanded: false, concealment };
+    return { panel, wasExpanded: false, concealment, restoreTab };
   } catch (error) {
     concealment.remove();
     throw error;
   }
+}
+
+function restoreNativeTranscriptState(
+  panel: HTMLElement,
+  restoreTab: HTMLElement | null,
+  restoreMenu: { menu: NativeMenuElement; index: number } | null,
+): void {
+  if (restoreMenu && selectedMenuIndex(restoreMenu.menu) !== restoreMenu.index) {
+    const target = restoreMenu.menu.querySelectorAll<HTMLElement>('tp-yt-paper-listbox a')[restoreMenu.index];
+    if (target) {
+      restoreMenu.menu.querySelector<HTMLElement>('#label')?.click();
+      target.click();
+    }
+  }
+  if (restoreTab?.isConnected && nativeSelectedTab(panel) !== restoreTab) restoreTab.click();
 }
 
 function closeNativeTranscript(panel: HTMLElement, concealment: HTMLStyleElement | null): void {
@@ -354,6 +377,7 @@ async function readNativeTranscript(
       return failure(request, 'STALE_VIDEO', 'Video đã thay đổi trước khi transcript native được đọc.');
     }
     let opened: Awaited<ReturnType<typeof openNativeTranscript>> | null = null;
+    let restoreMenu: { menu: NativeMenuElement; index: number } | null = null;
     try {
       opened = await openNativeTranscript(signal);
       const { panel } = opened;
@@ -363,6 +387,10 @@ async function readNativeTranscript(
       let menu = isOnlyRequestedTrack ? null : panel.querySelector<NativeMenuElement>('yt-dropdown-menu');
       if (!menu && !isOnlyRequestedTrack) {
         menu = await waitForNativeValue(() => panel.querySelector<NativeMenuElement>('yt-dropdown-menu'), signal);
+      }
+      if (menu) {
+        const initialMenuIndex = selectedMenuIndex(menu);
+        if (initialMenuIndex >= 0) restoreMenu = { menu, index: initialMenuIndex };
       }
       const priorInspection = inspectNativeTranscript(panel);
       const priorSignature = nativeInspectionSignature(priorInspection);
@@ -429,7 +457,14 @@ async function readNativeTranscript(
       }
       return failure(request, 'TRANSCRIPT_ENDPOINT_UNAVAILABLE', 'YouTube chưa mở được transcript native cho video này.');
     } finally {
-      if (opened && !opened.wasExpanded) closeNativeTranscript(opened.panel, opened.concealment);
+      if (opened) {
+        if (isCurrentVideo(request.videoId)) {
+          restoreNativeTranscriptState(opened.panel, opened.restoreTab, restoreMenu);
+          if (!opened.wasExpanded) closeNativeTranscript(opened.panel, opened.concealment);
+        } else {
+          opened.concealment?.remove();
+        }
+      }
     }
   };
 

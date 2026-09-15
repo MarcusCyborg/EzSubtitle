@@ -200,6 +200,39 @@ describe('YouTube panel lifecycle', () => {
     expect(video.currentTime).toBe(1);
   });
 
+  it('highlights and follows the active line until the user turns following off', async () => {
+    panel = new YoutubeTranscriptPanel({
+      loadContext: async () => successContext(context('Fixture', [english])),
+      loadTranscript: async () => multiTranscript(),
+    });
+    panel.start();
+    await settle();
+    const root = panelRoot();
+    const video = document.querySelector<HTMLVideoElement>('video')!;
+    const scroller = root.querySelector<HTMLElement>('.transcript')!;
+    const scrollTo = vi.fn();
+    Object.defineProperty(scroller, 'scrollTo', { configurable: true, value: scrollTo });
+
+    video.currentTime = 7;
+    video.dispatchEvent(new Event('timeupdate'));
+    expect(root.querySelector('[data-segment-index="1"]')?.classList.contains('segment--active')).toBe(true);
+    expect(scrollTo).toHaveBeenCalledOnce();
+
+    const follow = root.querySelector<HTMLButtonElement>('[data-action="follow-playback"]')!;
+    expect(follow.getAttribute('aria-pressed')).toBe('true');
+    follow.click();
+    expect(follow.title).toBe('Bật tự theo dõi');
+    video.currentTime = 14;
+    video.dispatchEvent(new Event('timeupdate'));
+    expect(root.querySelector('[data-segment-index="2"]')?.classList.contains('segment--active')).toBe(true);
+    expect(scrollTo).toHaveBeenCalledOnce();
+
+    follow.click();
+    expect(follow.title).toBe('Tắt tự theo dõi');
+    expect(follow.getAttribute('aria-pressed')).toBe('true');
+    expect(scrollTo).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps detailed rows and seek offsets while switching export mode without reloading', async () => {
     const loadTranscript = vi.fn(async () => multiTranscript());
     panel = new YoutubeTranscriptPanel({

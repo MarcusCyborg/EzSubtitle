@@ -15,6 +15,7 @@ type PanelState = {
   context: VideoContext | null;
   expanded: boolean;
   feedback: { kind: 'info' | 'error'; message: string } | null;
+  followPlayback: boolean;
   loading: boolean;
   outputMode: TranscriptOutputMode;
   selectedTrack: CaptionTrack | null;
@@ -46,6 +47,7 @@ select { width:100%; min-width:0; height:31px; padding:0 27px 0 9px; border:1px 
 .tools { display:flex; flex:0 0 auto; gap:2px; }
 .icon-button { display:grid; width:31px; height:31px; place-items:center; padding:0; border:0; border-radius:7px; color:var(--text); background:transparent; cursor:pointer; }
 .icon-button:hover:not(:disabled) { color:var(--accent); background:var(--accent-soft); }
+.icon-button--active { color:var(--accent); background:var(--accent-soft); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
 .icon-button:disabled { opacity:.42; cursor:not-allowed; }
 .icon-button svg { width:18px; height:18px; fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:1.8; }
 .status, .empty { padding:15px 13px; color:var(--muted); font-size:12px; line-height:1.45; }
@@ -76,12 +78,16 @@ function createIcon(path: string): SVGSVGElement {
   return svg;
 }
 
-function createIconButton(label: string, iconPath: string, disabled: boolean, onClick: () => void): HTMLButtonElement {
+function createIconButton(label: string, iconPath: string, disabled: boolean, onClick: () => void, pressed?: boolean): HTMLButtonElement {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'icon-button';
   button.title = label;
   button.setAttribute('aria-label', label);
+  if (pressed !== undefined) {
+    button.setAttribute('aria-pressed', String(pressed));
+    button.classList.toggle('icon-button--active', pressed);
+  }
   button.disabled = disabled;
   button.append(createIcon(iconPath));
   button.addEventListener('click', onClick);
@@ -106,6 +112,7 @@ export class YoutubeTranscriptPanel {
     context: null,
     expanded: false,
     feedback: null,
+    followPlayback: true,
     loading: false,
     outputMode: DEFAULT_OUTPUT_FORMAT,
     selectedTrack: null,
@@ -278,15 +285,45 @@ export class YoutubeTranscriptPanel {
     const segments = this.state.transcript?.segments;
     if (!segments || !this.video || !Number.isFinite(this.video.currentTime)) return;
     const nextIndex = findActiveSegmentIndex(segments, this.video.currentTime * 1_000);
-    if (nextIndex === this.activeIndex) return;
-    this.rowAt(this.activeIndex)?.classList.remove('segment--active');
-    this.activeIndex = nextIndex;
-    this.rowAt(this.activeIndex)?.classList.add('segment--active');
+    if (nextIndex !== this.activeIndex) {
+      this.rowAt(this.activeIndex)?.classList.remove('segment--active');
+      this.activeIndex = nextIndex;
+      this.rowAt(this.activeIndex)?.classList.add('segment--active');
+      if (this.state.followPlayback) this.scrollToActiveSegment();
+    }
   };
 
   private rowAt(index: number): HTMLButtonElement | null {
     return this.root?.querySelector<HTMLButtonElement>(`[data-segment-index="${index}"]`) ?? null;
   }
+
+  private scrollToActiveSegment(): boolean {
+    const row = this.rowAt(this.activeIndex);
+    const scroller = this.root?.querySelector<HTMLElement>('.transcript');
+    if (!row || !scroller) return false;
+    const top = Math.max(0, row.offsetTop - (scroller.clientHeight - row.offsetHeight) / 2);
+    if (typeof scroller.scrollTo === 'function') scroller.scrollTo({ top, behavior: 'smooth' });
+    else scroller.scrollTop = top;
+    return true;
+  }
+
+  private toggleFollowPlayback = (): void => {
+    this.state = { ...this.state, followPlayback: !this.state.followPlayback };
+    const button = this.root?.querySelector<HTMLButtonElement>('[data-action="follow-playback"]');
+    if (button) {
+      const label = this.state.followPlayback ? 'Tắt tự theo dõi' : 'Bật tự theo dõi';
+      button.title = label;
+      button.setAttribute('aria-label', label);
+      button.setAttribute('aria-pressed', String(this.state.followPlayback));
+      button.classList.toggle('icon-button--active', this.state.followPlayback);
+    }
+    if (this.state.followPlayback) {
+      this.bindVideo();
+      const previousIndex = this.activeIndex;
+      this.syncActiveSegment();
+      if (previousIndex === this.activeIndex) this.scrollToActiveSegment();
+    }
+  };
 
   private jumpToCurrentTime = (): void => {
     const segments = this.state.transcript?.segments;
@@ -295,17 +332,13 @@ export class YoutubeTranscriptPanel {
       this.setFeedback('Video chưa sẵn sàng để xác định thời điểm hiện tại.', 'error');
       return;
     }
+    const previousIndex = this.activeIndex;
     this.syncActiveSegment();
-    const row = this.rowAt(this.activeIndex);
-    if (!row) {
+    const followedNewSegment = this.state.followPlayback && previousIndex !== this.activeIndex;
+    if (!followedNewSegment && !this.scrollToActiveSegment()) {
       this.setFeedback('Không tìm thấy đoạn transcript tại thời điểm hiện tại.', 'error');
       return;
     }
-    const scroller = this.root?.querySelector<HTMLElement>('.transcript');
-    if (!scroller) return;
-    const top = Math.max(0, row.offsetTop - (scroller.clientHeight - row.offsetHeight) / 2);
-    if (typeof scroller.scrollTo === 'function') scroller.scrollTo({ top, behavior: 'smooth' });
-    else scroller.scrollTop = top;
   };
 
   private copyTranscript = (): void => {
@@ -421,7 +454,16 @@ export class YoutubeTranscriptPanel {
     controls.append(language, output);
     const tools = document.createElement('div');
     tools.className = 'tools';
+    const followButton = createIconButton(
+      this.state.followPlayback ? 'Tắt tự theo dõi' : 'Bật tự theo dõi',
+      'M12 3v3m0 12v3M3 12h3m12 0h3m-6 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
+      !hasTranscript,
+      this.toggleFollowPlayback,
+      this.state.followPlayback,
+    );
+    followButton.dataset.action = 'follow-playback';
     tools.append(
+      followButton,
       createIconButton('Đi tới thời điểm hiện tại', 'M12 6v6l4 2m5-2a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z', !hasTranscript, this.jumpToCurrentTime),
       createIconButton('Sao chép transcript', 'M8 8h10v12H8z M6 16H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1', !hasTranscript, this.copyTranscript),
       createIconButton('Tải transcript .txt', 'M12 3v12m0 0 4-4m-4 4-4-4 M5 20h14', !hasTranscript, this.downloadTranscript),

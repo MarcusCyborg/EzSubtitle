@@ -15,6 +15,7 @@ let endpointUnavailable = false;
 let nativeErrorCode = 'TRANSCRIPT_ENDPOINT_UNAVAILABLE';
 let nativeSegments: Array<{ startMs: number; text: string }> = [];
 let nativeIsOnlyTrack = false;
+let nativeRequests = 0;
 
 beforeAll(async () => {
   vi.stubGlobal('defineContentScript', (value: ContentDefinition) => {
@@ -44,6 +45,7 @@ beforeAll(async () => {
       return;
     }
     if (request.action === 'FETCH_NATIVE_TRANSCRIPT') {
+      nativeRequests += 1;
       nativeIsOnlyTrack = request.isOnlyTrack === true;
       window.dispatchEvent(new CustomEvent('ezsubtitle:page-response', {
         detail: nativeSegments.length
@@ -76,6 +78,7 @@ beforeEach(() => {
   nativeErrorCode = 'TRANSCRIPT_ENDPOINT_UNAVAILABLE';
   nativeSegments = [];
   nativeIsOnlyTrack = false;
+  nativeRequests = 0;
   snapshot = {
     videoDetails: { videoId: 'dQw4w9WgXcQ', title: 'Fixture video' },
     captions: { playerCaptionsTracklistRenderer: { captionTracks: [
@@ -121,6 +124,7 @@ describe('YouTube content bridge mock', () => {
       expect(response.data.text).toContain('supply chains,');
       expect(response.data.text).not.toContain('seconds');
     }
+    expect(nativeRequests).toBe(0);
   });
 
   it('recovers formatted text from visible DOM without Polymer data when all bridges fail', async () => {
@@ -134,6 +138,7 @@ describe('YouTube content bridge mock', () => {
       expect(response.data.text).toContain('Xin chào.');
       expect(response.data.text).toContain('Bài học hôm nay.');
     }
+    expect(nativeRequests).toBe(0);
   });
 
   it.each([undefined, 2])('does not guess the visible language with track count %s', async (trackCount) => {
@@ -143,7 +148,7 @@ describe('YouTube content bridge mock', () => {
     });
   });
 
-  it.each(['hidden', 'untimed', 'mixed', 'old-video', 'unstable'])('rejects %s native transcript data', async (kind) => {
+  it.each(['hidden', 'untimed', 'mixed', 'old-video'])('rejects %s native transcript data', async (kind) => {
     const panel = renderVisibleTranscript();
     if (kind === 'hidden') panel.setAttribute('visibility', 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN');
     if (kind === 'untimed') panel.querySelector('.segment-timestamp')?.remove();
@@ -158,7 +163,6 @@ describe('YouTube content bridge mock', () => {
       document.body.append(watch);
       watch.append(panel);
     }
-    if (kind === 'unstable') nativeErrorCode = 'NATIVE_TRANSCRIPT_UNSTABLE';
     await expect(fetchPageTranscript('dQw4w9WgXcQ', domTrack, 1)).resolves.toMatchObject({ ok: false });
   });
 
