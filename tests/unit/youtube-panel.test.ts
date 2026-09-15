@@ -74,6 +74,30 @@ afterEach(() => {
 });
 
 describe('YouTube panel lifecycle', () => {
+  it('starts collapsed by default and loads only after the user expands it', async () => {
+    vi.mocked(chrome.storage.local.get as (key: string) => Promise<Record<string, unknown>>).mockResolvedValue({});
+    const loadContext = vi.fn(async () => successContext(context('Fixture')));
+    panel = new YoutubeTranscriptPanel({
+      loadContext,
+      loadTranscript: async () => transcript('Hello'),
+    });
+
+    panel.start();
+    await settle();
+
+    const header = panelRoot().querySelector<HTMLButtonElement>('.header')!;
+    expect(header.getAttribute('aria-expanded')).toBe('false');
+    expect(header.title).toBe('Mở transcript');
+    expect(panelRoot().querySelector('.body')).toBeNull();
+    expect(loadContext).not.toHaveBeenCalled();
+
+    header.click();
+    await settle();
+
+    expect(panelRoot().querySelector('.header')?.getAttribute('aria-expanded')).toBe('true');
+    expect(loadContext).toHaveBeenCalledOnce();
+  });
+
   it('does not rebuild transcript rows for unrelated DOM mutations', async () => {
     panel = new YoutubeTranscriptPanel({
       loadContext: async () => successContext(context('Fixture')),

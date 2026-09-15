@@ -35,7 +35,8 @@ const panelCss = `
 .header:focus-visible, .icon-button:focus-visible, select:focus-visible, .retry:focus-visible, .segment:focus-visible { outline:3px solid #e6ad42; outline-offset:-3px; }
 .logo { width:27px; height:27px; border-radius:7px; object-fit:cover; }
 .brand { flex:1; min-width:0; font:700 15px/1 Georgia, serif; letter-spacing:-.15px; }
-.chevron { width:20px; height:20px; color:var(--muted); transition:transform .18s ease; }
+.chevron { width:30px; height:30px; padding:6px; border:1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius:999px; color:var(--accent); background:var(--accent-soft); box-shadow:0 1px 2px rgba(0,0,0,.08); fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:2.2; transition:transform .18s ease, background-color .18s ease; }
+.header:hover .chevron { background:var(--active); }
 .chevron--expanded { transform:rotate(180deg); }
 .body { border-top:1px solid var(--line); }
 .toolbar { display:flex; align-items:flex-end; justify-content:space-between; gap:8px; padding:9px 10px; background:var(--surface); }
@@ -103,7 +104,7 @@ export class YoutubeTranscriptPanel {
   private sequence = 0;
   private state: PanelState = {
     context: null,
-    expanded: true,
+    expanded: false,
     feedback: null,
     loading: false,
     outputMode: DEFAULT_OUTPUT_FORMAT,
@@ -349,6 +350,7 @@ export class YoutubeTranscriptPanel {
     header.type = 'button';
     header.className = 'header';
     header.setAttribute('aria-expanded', String(this.state.expanded));
+    header.title = this.state.expanded ? 'Thu gọn transcript' : 'Mở transcript';
     header.addEventListener('click', this.toggleExpanded);
     const logo = document.createElement('img');
     logo.className = 'logo';
