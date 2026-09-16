@@ -25,19 +25,26 @@ type PanelState = {
 
 const STORAGE_KEY = 'youtubePanelExpanded';
 const HOST_ID = 'ezsubtitle-youtube-panel-host';
+const LONG_TRANSCRIPT_CHARS = 20_000;
 
 const panelCss = `
 :host { display:block; width:100%; margin:0 0 16px; color:#0f0f0f; font-family:"Trebuchet MS", "Segoe UI", sans-serif; }
 * { box-sizing:border-box; }
 .card { --bg:#fffdf7; --surface:#f7f4ec; --text:#17232d; --muted:#68747d; --line:#d8d5cb; --accent:#b87315; --accent-soft:#fff1d6; --active:#f1e1bf; overflow:hidden; border:1px solid var(--line); border-radius:12px; background:var(--bg); box-shadow:0 1px 2px rgba(0,0,0,.08); }
 :host-context(html[dark]) .card, :host-context([dark]) .card { --bg:#202124; --surface:#2b2c2f; --text:#f1f3f4; --muted:#aeb5ba; --line:#44474c; --accent:#f1b550; --accent-soft:#4a3a1d; --active:#443719; box-shadow:none; }
-.header { display:flex; align-items:center; width:100%; min-height:48px; gap:9px; padding:8px 10px; border:0; color:var(--text); background:var(--bg); cursor:pointer; text-align:left; }
-.header:hover { background:var(--surface); }
-.header:focus-visible, .icon-button:focus-visible, select:focus-visible, .retry:focus-visible, .segment:focus-visible { outline:3px solid #e6ad42; outline-offset:-3px; }
+.header-row { display:flex; align-items:center; width:100%; min-height:48px; gap:7px; padding:7px 9px; background:var(--bg); }
+.header { display:flex; min-width:0; flex:1; align-items:center; gap:9px; align-self:stretch; padding:0; border:0; color:var(--text); background:transparent; cursor:pointer; text-align:left; }
+.header:hover { color:var(--accent); }
+.header:focus-visible, .header-chevron:focus-visible, .summary-button:focus-visible, .icon-button:focus-visible, input:focus-visible, select:focus-visible, .retry:focus-visible, .segment:focus-visible { outline:3px solid #e6ad42; outline-offset:-3px; }
 .logo { width:27px; height:27px; border-radius:7px; object-fit:cover; }
 .brand { flex:1; min-width:0; font:700 15px/1 Georgia, serif; letter-spacing:-.15px; }
-.chevron { width:30px; height:30px; padding:6px; border:1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius:999px; color:var(--accent); background:var(--accent-soft); box-shadow:0 1px 2px rgba(0,0,0,.08); fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:2.2; transition:transform .18s ease, background-color .18s ease; }
-.header:hover .chevron { background:var(--active); }
+.summary-button { display:flex; flex:0 0 auto; align-items:center; gap:5px; height:31px; padding:0 10px; border:1px solid color-mix(in srgb, var(--accent) 52%, var(--line)); border-radius:999px; color:var(--accent); background:var(--accent-soft); font:700 11px/1 "Trebuchet MS", "Segoe UI", sans-serif; cursor:pointer; }
+.summary-button:hover:not(:disabled) { background:var(--active); }
+.summary-button:disabled { opacity:.48; cursor:wait; }
+.summary-button svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:1.9; }
+.header-chevron { display:grid; width:31px; height:31px; flex:0 0 auto; place-items:center; padding:0; border:1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius:999px; color:var(--accent); background:var(--accent-soft); box-shadow:0 1px 2px rgba(0,0,0,.08); cursor:pointer; }
+.header-chevron:hover { background:var(--active); }
+.chevron { width:17px; height:17px; fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:2.2; transition:transform .18s ease; }
 .chevron--expanded { transform:rotate(180deg); }
 .body { border-top:1px solid var(--line); }
 .toolbar { display:flex; align-items:flex-end; justify-content:space-between; gap:8px; padding:9px 10px; background:var(--surface); }
@@ -58,12 +65,24 @@ select { width:100%; min-width:0; height:31px; padding:0 27px 0 9px; border:1px 
 .feedback--error { color:#9f3023; background:#fff0ec; }
 :host-context(html[dark]) .feedback { color:#c9e7bc; background:#29402a; }
 :host-context(html[dark]) .feedback--error { color:#ffb4a9; background:#4d2522; }
+.search { display:flex; align-items:center; gap:6px; padding:8px 10px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); background:var(--bg); }
+.search-box { position:relative; min-width:0; flex:1; }
+.search-box svg { position:absolute; top:50%; left:9px; width:15px; height:15px; transform:translateY(-50%); fill:none; stroke:var(--muted); stroke-linecap:round; stroke-width:1.9; pointer-events:none; }
+.search-input { width:100%; height:31px; padding:0 9px 0 31px; border:1px solid var(--line); border-radius:7px; color:var(--text); background:var(--surface); font:600 12px/1 "Trebuchet MS", "Segoe UI", sans-serif; }
+.search-count { min-width:43px; color:var(--muted); font:700 10px/1 "Courier New", monospace; text-align:center; }
+.search-nav { display:grid; width:29px; height:29px; place-items:center; padding:0; border:1px solid var(--line); border-radius:7px; color:var(--text); background:var(--surface); cursor:pointer; }
+.search-nav:hover:not(:disabled) { color:var(--accent); background:var(--accent-soft); }
+.search-nav:disabled { opacity:.4; cursor:not-allowed; }
+.search-nav svg { width:15px; height:15px; fill:none; stroke:currentColor; stroke-linecap:round; stroke-linejoin:round; stroke-width:2; }
 .transcript { max-height:min(66vh, 700px); overflow:auto; overscroll-behavior:contain; scrollbar-color:var(--line) transparent; }
 .segment { display:grid; grid-template-columns:57px minmax(0,1fr); width:100%; gap:8px; padding:9px 10px; border:0; border-bottom:1px solid color-mix(in srgb, var(--line) 65%, transparent); color:var(--text); background:transparent; cursor:pointer; text-align:left; font:13px/1.45 "Trebuchet MS", "Segoe UI", sans-serif; }
 .segment:hover { background:var(--surface); }
 .segment--active { background:var(--active); }
+.segment--search-current { box-shadow:inset 3px 0 0 var(--accent); background:var(--accent-soft); }
 .time { color:var(--accent); font:700 12px/1.55 "Courier New", monospace; white-space:nowrap; }
 .text { overflow-wrap:anywhere; }
+mark { padding:0 1px; border-radius:2px; color:inherit; background:#ffd668; }
+:host-context(html[dark]) mark, :host-context([dark]) mark { background:#8a6417; }
 @media (max-width: 450px) { .toolbar { align-items:stretch; flex-direction:column; } .tools { align-self:flex-end; } .controls { grid-template-columns:1fr; } }
 `;
 
@@ -107,6 +126,9 @@ export class YoutubeTranscriptPanel {
   private observer: MutationObserver | null = null;
   private root: ShadowRoot | null = null;
   private scheduledMount = false;
+  private searchCursor = -1;
+  private searchMatches: number[] = [];
+  private searchQuery = '';
   private sequence = 0;
   private state: PanelState = {
     context: null,
@@ -151,6 +173,9 @@ export class YoutubeTranscriptPanel {
   private readonly handleNavigation = (): void => {
     this.sequence += 1;
     this.activeIndex = -1;
+    this.searchCursor = -1;
+    this.searchMatches = [];
+    this.searchQuery = '';
     this.detachVideo();
     this.state = { ...this.state, context: null, selectedTrack: null, transcript: null, feedback: null, error: null, loading: false };
     this.render();
@@ -233,6 +258,8 @@ export class YoutubeTranscriptPanel {
   private async loadTrack(context: VideoContext, track: CaptionTrack): Promise<void> {
     const sequence = ++this.sequence;
     this.activeIndex = -1;
+    this.searchCursor = -1;
+    this.searchMatches = [];
     this.state = { ...this.state, selectedTrack: track, loading: true, error: null, transcript: null };
     this.render();
     try {
@@ -361,6 +388,114 @@ export class YoutubeTranscriptPanel {
     }
   };
 
+  private prepareChatGpt = async (): Promise<void> => {
+    if (!this.state.transcript) {
+      if (!this.state.expanded) {
+        this.state = { ...this.state, expanded: true };
+        void chrome.storage.local.set({ [STORAGE_KEY]: true }).catch(() => undefined);
+        this.render();
+      }
+      if (!this.state.loading) await this.loadContext();
+    }
+    const segments = this.state.transcript?.segments;
+    if (!segments?.length) return;
+    const transcript = formatTranscript(segments, 'readable');
+    if (transcript.length >= LONG_TRANSCRIPT_CHARS) {
+      const accepted = window.confirm(`Transcript có ${transcript.length.toLocaleString('vi-VN')} ký tự và sẽ được chuyển nguyên vẹn sang ChatGPT. Bạn có muốn tiếp tục?`);
+      if (!accepted) return;
+    }
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'PREPARE_CHATGPT_DRAFT',
+        transcript,
+      }) as RuntimeResponse<{ tabId: number }>;
+      if (!response?.ok) throw new Error(response?.error.message ?? 'Không thể mở ChatGPT.');
+      this.setFeedback('Đã mở ChatGPT và điền bản nháp. Bạn kiểm tra rồi bấm gửi.', 'info');
+    } catch (error) {
+      this.setFeedback(error instanceof Error ? error.message : 'Không thể mở ChatGPT.', 'error');
+    }
+  };
+
+  private updateSearchQuery(value: string): void {
+    this.searchQuery = value;
+    this.searchCursor = -1;
+    this.refreshSearchResults();
+  }
+
+  private moveSearch(direction: -1 | 1, seek = false): void {
+    if (!this.searchMatches.length) return;
+    this.searchCursor = this.searchCursor < 0
+      ? direction > 0 ? 0 : this.searchMatches.length - 1
+      : (this.searchCursor + direction + this.searchMatches.length) % this.searchMatches.length;
+    this.refreshSearchResults();
+    const index = this.searchMatches[this.searchCursor];
+    if (index === undefined) return;
+    const row = this.rowAt(index);
+    const scroller = this.root?.querySelector<HTMLElement>('.transcript');
+    if (row && scroller) {
+      const top = Math.max(0, row.offsetTop - (scroller.clientHeight - row.offsetHeight) / 2);
+      if (typeof scroller.scrollTo === 'function') scroller.scrollTo({ top, behavior: 'smooth' });
+      else scroller.scrollTop = top;
+    }
+    if (seek) {
+      const segment = this.state.transcript?.segments[index];
+      if (segment) this.seekToSegment(segment);
+    }
+  }
+
+  private refreshSearchResults(): void {
+    const segments = this.state.transcript?.segments ?? [];
+    const query = this.searchQuery.trim();
+    const normalizedQuery = query.toLocaleLowerCase();
+    this.searchMatches = normalizedQuery
+      ? segments.flatMap((segment, index) => segment.text.toLocaleLowerCase().includes(normalizedQuery) ? [index] : [])
+      : [];
+    if (!this.searchMatches.length) this.searchCursor = -1;
+    else if (this.searchCursor >= this.searchMatches.length) this.searchCursor = 0;
+
+    const currentIndex = this.searchCursor >= 0 ? this.searchMatches[this.searchCursor] : undefined;
+    segments.forEach((segment, index) => {
+      const row = this.rowAt(index);
+      row?.classList.toggle('segment--search-current', index === currentIndex);
+      const text = row?.querySelector<HTMLElement>('.text');
+      if (text) this.renderSearchHighlight(text, segment.text, query);
+    });
+    const counter = this.root?.querySelector<HTMLElement>('[data-search-count]');
+    if (counter) {
+      counter.textContent = query
+        ? this.searchMatches.length
+          ? this.searchCursor >= 0 ? `${this.searchCursor + 1}/${this.searchMatches.length}` : `${this.searchMatches.length} kq`
+          : '0 kq'
+        : '';
+    }
+    for (const button of this.root?.querySelectorAll<HTMLButtonElement>('[data-search-nav]') ?? []) {
+      button.disabled = !this.searchMatches.length;
+    }
+  }
+
+  private renderSearchHighlight(element: HTMLElement, text: string, query: string): void {
+    element.replaceChildren();
+    if (!query) {
+      element.textContent = text;
+      return;
+    }
+    const normalizedText = text.toLocaleLowerCase();
+    const normalizedQuery = query.toLocaleLowerCase();
+    let cursor = 0;
+    while (cursor < text.length) {
+      const matchIndex = normalizedText.indexOf(normalizedQuery, cursor);
+      if (matchIndex < 0) {
+        element.append(document.createTextNode(text.slice(cursor)));
+        break;
+      }
+      if (matchIndex > cursor) element.append(document.createTextNode(text.slice(cursor, matchIndex)));
+      const mark = document.createElement('mark');
+      mark.textContent = text.slice(matchIndex, matchIndex + query.length);
+      element.append(mark);
+      cursor = matchIndex + query.length;
+    }
+  }
+
   private seekToSegment(segment: TranscriptSegment): void {
     this.bindVideo();
     if (!this.video || this.video.readyState < HTMLMediaElement.HAVE_METADATA) {
@@ -379,6 +514,8 @@ export class YoutubeTranscriptPanel {
     const card = document.createElement('section');
     card.className = 'card';
 
+    const headerRow = document.createElement('div');
+    headerRow.className = 'header-row';
     const header = document.createElement('button');
     header.type = 'button';
     header.className = 'header';
@@ -392,16 +529,35 @@ export class YoutubeTranscriptPanel {
     const brand = document.createElement('span');
     brand.className = 'brand';
     brand.textContent = 'EzSubtitle';
+    header.append(logo, brand);
+    const summaryButton = document.createElement('button');
+    summaryButton.type = 'button';
+    summaryButton.className = 'summary-button';
+    summaryButton.title = 'Mở ChatGPT và tự điền prompt tóm tắt';
+    summaryButton.disabled = this.state.loading;
+    summaryButton.append(createIcon('M12 3l1.4 4.1L17.5 8.5l-4.1 1.4L12 14l-1.4-4.1-4.1-1.4 4.1-1.4L12 3Z M18 14l.8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z'));
+    const summaryLabel = document.createElement('span');
+    summaryLabel.textContent = 'Tóm tắt';
+    summaryButton.append(summaryLabel);
+    summaryButton.addEventListener('click', () => void this.prepareChatGpt());
+    const chevronButton = document.createElement('button');
+    chevronButton.type = 'button';
+    chevronButton.className = 'header-chevron';
+    chevronButton.setAttribute('aria-expanded', String(this.state.expanded));
+    chevronButton.title = this.state.expanded ? 'Thu gọn transcript' : 'Mở transcript';
+    chevronButton.addEventListener('click', this.toggleExpanded);
     const chevron = createIcon('m6 9 6 6 6-6');
     chevron.classList.add('chevron');
     if (this.state.expanded) chevron.classList.add('chevron--expanded');
-    header.append(logo, brand, chevron);
-    card.append(header);
+    chevronButton.append(chevron);
+    headerRow.append(header, summaryButton, chevronButton);
+    card.append(headerRow);
 
     if (this.state.expanded) card.append(this.renderBody());
     this.root.replaceChildren(style, card);
     const scroller = this.root.querySelector<HTMLElement>('.transcript');
     if (scroller) scroller.scrollTop = savedScrollTop;
+    this.refreshSearchResults();
   }
 
   private renderBody(): HTMLElement {
@@ -507,6 +663,37 @@ export class YoutubeTranscriptPanel {
       body.append(empty);
       return body;
     }
+
+    const search = document.createElement('div');
+    search.className = 'search';
+    const searchBox = document.createElement('div');
+    searchBox.className = 'search-box';
+    searchBox.append(createIcon('m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z'));
+    const searchInput = document.createElement('input');
+    searchInput.type = 'search';
+    searchInput.className = 'search-input';
+    searchInput.placeholder = 'Tìm trong transcript...';
+    searchInput.setAttribute('aria-label', 'Tìm trong transcript');
+    searchInput.value = this.searchQuery;
+    searchInput.addEventListener('input', () => this.updateSearchQuery(searchInput.value));
+    searchInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        this.moveSearch(event.shiftKey ? -1 : 1, true);
+      }
+    });
+    searchBox.append(searchInput);
+    const searchCount = document.createElement('span');
+    searchCount.className = 'search-count';
+    searchCount.dataset.searchCount = '';
+    const previous = createIconButton('Kết quả trước', 'm15 18-6-6 6-6', true, () => this.moveSearch(-1));
+    previous.className = 'search-nav';
+    previous.dataset.searchNav = 'previous';
+    const next = createIconButton('Kết quả sau', 'm9 18 6-6-6-6', true, () => this.moveSearch(1));
+    next.className = 'search-nav';
+    next.dataset.searchNav = 'next';
+    search.append(searchBox, searchCount, previous, next);
+    body.append(search);
 
     const transcript = document.createElement('div');
     transcript.className = 'transcript';

@@ -33,6 +33,7 @@ const multiTranscript = (): RuntimeResponse<TranscriptResult> => ({
 const successContext = (value: VideoContext): VideoContextResponse => ({ ok: true, data: value });
 
 let panel: YoutubeTranscriptPanel | null = null;
+const runtimeSendMessage = vi.fn(async () => ({ ok: true, data: { tabId: 99 } }));
 
 async function settle(): Promise<void> {
   await Promise.resolve();
@@ -47,6 +48,7 @@ function panelRoot(): ShadowRoot {
 }
 
 beforeEach(() => {
+  runtimeSendMessage.mockClear();
   document.body.innerHTML = '<ytd-watch-flexy><div id="secondary"><div id="secondary-inner"></div></div></ytd-watch-flexy><video class="html5-main-video"></video>';
   const video = document.querySelector('video')!;
   Object.defineProperty(video, 'readyState', { configurable: true, value: HTMLMediaElement.HAVE_METADATA });
@@ -58,7 +60,10 @@ beforeEach(() => {
     configurable: true,
     value: {
       storage: { local: { get: vi.fn(async () => ({ youtubePanelExpanded: true })), set: vi.fn(async () => undefined) } },
-      runtime: { getURL: (path: string) => `chrome-extension://fixture/${path}` },
+      runtime: {
+        getURL: (path: string) => `chrome-extension://fixture/${path}`,
+        sendMessage: runtimeSendMessage,
+      },
     },
   });
   Object.defineProperty(navigator, 'clipboard', {
@@ -264,6 +269,51 @@ describe('YouTube panel lifecycle', () => {
     const video = document.querySelector<HTMLVideoElement>('video')!;
     firstRow.click();
     expect(video.currentTime).toBe(1);
+  });
+
+  it('searches, highlights, navigates, and seeks from the keyboard', async () => {
+    panel = new YoutubeTranscriptPanel({
+      loadContext: async () => successContext(context('Fixture', [english])),
+      loadTranscript: async () => multiTranscript(),
+    });
+    panel.start();
+    await settle();
+    const root = panelRoot();
+    const input = root.querySelector<HTMLInputElement>('[aria-label="Tìm trong transcript"]')!;
+    input.value = 'sentence';
+    input.dispatchEvent(new Event('input'));
+
+    expect(root.querySelector('[data-search-count]')?.textContent).toBe('1 kq');
+    expect(root.querySelectorAll('mark')).toHaveLength(1);
+    expect(root.querySelector('mark')?.textContent).toBe('sentence');
+
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(document.querySelector<HTMLVideoElement>('video')?.currentTime).toBe(7);
+    expect(root.querySelector('[data-search-count]')?.textContent).toBe('1/1');
+    expect(root.querySelector('[data-segment-index="1"]')?.classList).toContain('segment--search-current');
+  });
+
+  it('places the summary action before the dropdown and prepares a ChatGPT draft without sending it', async () => {
+    panel = new YoutubeTranscriptPanel({
+      loadContext: async () => successContext(context('Fixture', [english])),
+      loadTranscript: async () => multiTranscript(),
+    });
+    panel.start();
+    await settle();
+    const root = panelRoot();
+    const header = root.querySelector('.header-row')!;
+    const summary = root.querySelector<HTMLButtonElement>('.summary-button')!;
+    const dropdown = root.querySelector<HTMLButtonElement>('.header-chevron')!;
+
+    expect(Array.from(header.children).indexOf(summary)).toBeLessThan(Array.from(header.children).indexOf(dropdown));
+    summary.click();
+    await settle();
+
+    expect(runtimeSendMessage).toHaveBeenCalledOnce();
+    expect(runtimeSendMessage).toHaveBeenCalledWith({
+      type: 'PREPARE_CHATGPT_DRAFT',
+      transcript: '(00:01) First sentence.\n\n(00:14) Next block.',
+    });
   });
 
   it('uses identical text for clipboard and download in the same mode', async () => {

@@ -7,8 +7,10 @@ Extension Manifest V3 cho Chrome và Microsoft Edge: lấy toàn bộ phụ đ�
 - Đọc caption track từ player response của YouTube, gồm phụ đề tải lên và phụ đề tự động.
 - Chọn ngôn ngữ; mặc định ưu tiên English thủ công, rồi English tự động, rồi track đầu tiên.
 - Parse JSON3, `srv3`, và XML classic; giữ thứ tự và timestamp bắt đầu của từng caption.
-- Sao chép hoặc tải `.txt` với định dạng duy nhất `[HH:MM:SS] Nội dung`.
+- Tìm kiếm, tô sáng kết quả và tua video trực tiếp từ transcript trong panel YouTube.
+- Sao chép hoặc tải `.txt` theo định dạng dễ đọc hoặc chi tiết.
 - Mở ChatGPT với toàn bộ transcript kèm prompt tóm tắt tiếng Việt. Extension chỉ điền composer theo best-effort, tuyệt đối không tìm hoặc bấm Send.
+- Nút **Tóm tắt** nằm ngay trên tiêu đề panel YouTube để mở ChatGPT mà không cần qua popup.
 - Nếu giao diện ChatGPT thay đổi làm autofill thất bại, một panel nhỏ cho phép sao chép nguyên draft để người dùng tự dán.
 
 ## Phát triển

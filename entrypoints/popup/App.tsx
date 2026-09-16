@@ -117,12 +117,13 @@ export default function App() {
 
   const prepareChatGpt = async () => {
     if (!transcript) return;
-    if (outputText.length >= LONG_TRANSCRIPT_CHARS) {
-      const accepted = window.confirm(`Transcript có ${outputText.length.toLocaleString('vi-VN')} ký tự và sẽ được chuyển nguyên vẹn sang ChatGPT. Bạn có muốn tiếp tục?`);
+    const summaryText = formatTranscript(transcript.segments, 'readable');
+    if (summaryText.length >= LONG_TRANSCRIPT_CHARS) {
+      const accepted = window.confirm(`Transcript có ${summaryText.length.toLocaleString('vi-VN')} ký tự và sẽ được chuyển nguyên vẹn sang ChatGPT. Bạn có muốn tiếp tục?`);
       if (!accepted) return;
     }
     try {
-      const response = await chrome.runtime.sendMessage({ type: 'PREPARE_CHATGPT_DRAFT', transcript: outputText }) as RuntimeResponse<{ tabId: number }>;
+      const response = await chrome.runtime.sendMessage({ type: 'PREPARE_CHATGPT_DRAFT', transcript: summaryText }) as RuntimeResponse<{ tabId: number }>;
       if (!response?.ok) throw new Error(response?.error.message ?? 'Không thể mở ChatGPT.');
       setFeedback({ kind: 'info', text: 'Đã mở ChatGPT. Extension sẽ không tự gửi tin nhắn.' });
     } catch (reason) {
