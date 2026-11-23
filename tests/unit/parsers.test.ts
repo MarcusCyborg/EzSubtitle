@@ -34,6 +34,50 @@ describe('caption parsers', () => {
     ]);
   });
 
+  it.each([
+    ['Japanese', '\u65e5\u672c', '\u65e5\u672c\u8a9e', '\u8a9e'],
+    ['Chinese', '\u4f60', '\u4f60\u597d', '\u597d'],
+    ['punctuation', 'Hello', 'Hello!', '!'],
+  ])('keeps only the new suffix of an overlapping %s caption', (_name, first, next, suffix) => {
+    const body = JSON.stringify({ events: [
+      { tStartMs: 1000, dDurationMs: 3000, wWinId: 1, segs: [{ utf8: first }] },
+      { tStartMs: 1400, dDurationMs: 3000, wWinId: 1, segs: [{ utf8: next }] },
+    ] });
+    expect(parseJson3Transcript(body)).toEqual([
+      { startMs: 1000, text: first },
+      { startMs: 1400, text: suffix },
+    ]);
+  });
+
+  it('keeps the full Japanese prefix when a caption expires or its window resets', () => {
+    const first = '\u65e5\u672c';
+    const next = '\u65e5\u672c\u8a9e';
+    const body = JSON.stringify({ events: [
+      { tStartMs: 1000, dDurationMs: 400, wWinId: 1, segs: [{ utf8: first }] },
+      { tStartMs: 1400, dDurationMs: 3000, wWinId: 1, segs: [{ utf8: next }] },
+      { tStartMs: 1500, id: 1 },
+      { tStartMs: 1600, dDurationMs: 3000, wWinId: 1, segs: [{ utf8: next }] },
+    ] });
+    expect(parseJson3Transcript(body)).toEqual([
+      { startMs: 1000, text: first },
+      { startMs: 1400, text: next },
+      { startMs: 1600, text: next },
+    ]);
+  });
+
+  it('does not remove a shared prefix across separate caption windows', () => {
+    const first = '\u65e5\u672c';
+    const next = '\u65e5\u672c\u8a9e';
+    const body = JSON.stringify({ events: [
+      { tStartMs: 1000, dDurationMs: 3000, wWinId: 1, segs: [{ utf8: first }] },
+      { tStartMs: 1400, dDurationMs: 3000, wWinId: 2, segs: [{ utf8: next }] },
+    ] });
+    expect(parseJson3Transcript(body)).toEqual([
+      { startMs: 1000, text: first },
+      { startMs: 1400, text: next },
+    ]);
+  });
+
   it('parses srv3 with multiple text spans', () => {
     expect(parseSrv3Transcript(fixture('srv3.xml'))).toEqual([
       { startMs: 3200, text: 'Hello world & friends' },

@@ -20,7 +20,8 @@ export type ParsedTranscript = {
 function rollingDelta(text: string, prior: string | undefined): string | null {
   if (!prior) return text;
   if (text === prior || prior.endsWith(text)) return null;
-  if (text.startsWith(`${prior} `)) return normalizeCaptionText(text.slice(prior.length));
+  // Rolling snapshots can grow without a word separator, as in Japanese.
+  if (text.startsWith(prior)) return normalizeCaptionText(text.slice(prior.length));
   return text;
 }
 
