@@ -1,5 +1,11 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CaptionTrack } from '../../src/types/transcript';
+import { transcriptResult } from '../../src/lib/transcript/provenance';
+
+const videoId = 'dQw4w9WgXcQ';
+const sender = { tab: { id: 7 } as chrome.tabs.Tab };
+const storage: Record<string, unknown> = {};
+const json3 = (text: string) => new Response(JSON.stringify({ events: [{ tStartMs: 1_000, segs: [{ utf8: text }] }] }));
 
 const track: CaptionTrack = {
   id: '.en', languageCode: 'en', label: 'English',
@@ -7,7 +13,7 @@ const track: CaptionTrack = {
 };
 
 let handleFetchTranscript: typeof import('../../entrypoints/background')['handleFetchTranscript'];
-const storageSet = vi.fn(async () => undefined);
+const storageSet = vi.fn(async (values: Record<string, unknown>) => Object.assign(storage, values));
 const tabsGet = vi.fn();
 const tabsSendMessage = vi.fn(async (): Promise<unknown> => undefined);
 
@@ -17,12 +23,14 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  for (const key of Object.keys(storage)) delete storage[key];
   storageSet.mockClear();
   tabsGet.mockReset();
+  tabsSendMessage.mockReset();
   Object.defineProperty(globalThis, 'chrome', {
     configurable: true,
     value: {
-      storage: { session: { get: vi.fn(async () => ({})), set: storageSet } },
+      storage: { session: { get: vi.fn(async (key: string) => ({ [key]: storage[key] })), set: storageSet } },
       tabs: { get: tabsGet, sendMessage: tabsSendMessage },
     },
   });
@@ -70,7 +78,7 @@ describe('background transcript cache ownership', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 404 })));
     tabsSendMessage.mockResolvedValue({
       ok: true,
-      data: { segments: [{ startMs: 1_000, text: 'Native transcript' }], text: '(00:01) Native transcript' },
+      data: transcriptResult([{ startMs: 1_000, text: 'Native transcript' }], videoId, track, 'native-dom'),
     });
 
     await handleFetchTranscript('dQw4w9WgXcQ', track, { tab: { id: 7 } as chrome.tabs.Tab }, undefined, 1);
@@ -78,5 +86,50 @@ describe('background transcript cache ownership', () => {
     expect(tabsSendMessage).toHaveBeenCalledWith(7, {
       type: 'FETCH_PAGE_TRANSCRIPT', videoId: 'dQw4w9WgXcQ', track, trackCount: 1,
     });
+  });
+
+  it('labels a fallback and retries timedtext on the next request instead of caching native text', async () => {
+    tabsGet.mockResolvedValue({ url: `https://www.youtube.com/watch?v=${videoId}` });
+    const fetch = vi.fn()
+      .mockImplementationOnce(async () => new Response('', { status: 410 }))
+      .mockImplementationOnce(async () => json3('Timedtext became available'))
+      .mockImplementationOnce(async () => json3('Fresh timedtext'));
+    vi.stubGlobal('fetch', fetch);
+    tabsSendMessage.mockResolvedValue({ ok: true, data: transcriptResult(
+      [{ startMs: 1_000, text: 'Native fallback' }], videoId, track, 'native-dom', ['EMPTY_RESPONSE'],
+    ) });
+
+    await expect(handleFetchTranscript(videoId, track, sender)).resolves.toMatchObject({
+      ok: true, data: { provenance: { source: 'native-dom', cacheHit: false, fallbackErrors: ['CAPTION_UNAVAILABLE', 'EMPTY_RESPONSE'] } },
+    });
+    expect(storageSet).not.toHaveBeenCalled();
+    await expect(handleFetchTranscript(videoId, track, sender)).resolves.toMatchObject({
+      ok: true, data: { provenance: { source: 'background-timedtext', cacheHit: false } },
+    });
+    await expect(handleFetchTranscript(videoId, track, sender)).resolves.toMatchObject({
+      ok: true, data: { provenance: { source: 'background-timedtext', cacheHit: true } },
+    });
+    await expect(handleFetchTranscript(videoId, track, sender, undefined, undefined, true)).resolves.toMatchObject({
+      ok: true, data: { segments: [{ startMs: 1_000, text: 'Fresh timedtext' }], provenance: { cacheHit: false } },
+    });
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['lang=vi', 'lang=en&kind=asr', 'lang=en&lang=vi'])('rejects metadata when the selected track contradicts %s', async (query) => {
+    await expect(handleFetchTranscript(videoId, {
+      ...track, baseUrl: `https://www.youtube.com/api/timedtext?v=${videoId}&${query}`,
+    }, sender)).resolves.toMatchObject({ ok: false, error: { code: 'INVALID_CAPTION_URL' } });
+    expect(tabsGet).not.toHaveBeenCalled();
+  });
+
+  it('rejects the page fallback for another translation', async () => {
+    tabsGet.mockResolvedValue({ url: `https://www.youtube.com/watch?v=${videoId}` });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('')));
+    tabsSendMessage.mockResolvedValue({ ok: true, data: transcriptResult(
+      [{ startMs: 0, text: 'Original' }], videoId, track, 'native-dom',
+    ) });
+    await expect(handleFetchTranscript(videoId, { ...track, baseUrl: track.baseUrl + '&tlang=vi' }, sender))
+      .resolves.toMatchObject({ ok: false });
+    expect(storageSet).not.toHaveBeenCalled();
   });
 });

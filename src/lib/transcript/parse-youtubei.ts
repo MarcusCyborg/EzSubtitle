@@ -44,20 +44,11 @@ function normalizeSegments(segments: TranscriptSegment[]): TranscriptSegment[] {
   segments.sort((left, right) => left.startMs - right.startMs);
   const result: TranscriptSegment[] = [];
   const exact = new Set<string>();
-  let priorRaw: TranscriptSegment | null = null;
   for (const segment of segments) {
     const key = `${segment.startMs}\u0000${segment.text}`;
     if (exact.has(key)) continue;
     exact.add(key);
-    if (priorRaw && segment.startMs - priorRaw.startMs <= 10_000 && segment.text.startsWith(priorRaw.text)) {
-      const delta = normalizeCaptionText(segment.text.slice(priorRaw.text.length));
-      priorRaw = segment;
-      if (!delta) continue;
-      result.push({ startMs: segment.startMs, text: delta });
-    } else {
-      result.push(segment);
-      priorRaw = segment;
-    }
+    result.push(segment);
   }
   return result;
 }

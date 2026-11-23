@@ -29,6 +29,7 @@ beforeEach(() => {
             { startMs: 20_000, text: 'Next block.' },
           ],
           text: '[00:00:06] First\n[00:00:12] sentence.\n[00:00:20] Next block.',
+          provenance: { source: 'page-timedtext', cacheHit: true },
         },
       };
     }
@@ -102,5 +103,13 @@ describe('popup output modes', () => {
 
     expect(preview.value).toBe('[00:00:06] First\n[00:00:12] sentence.\n[00:00:20] Next block.');
     expect(runtimeSendMessage.mock.calls.filter(([message]) => message.type === 'FETCH_TRANSCRIPT')).toHaveLength(fetchCount);
+
+    expect(container?.textContent).toContain('Nguồn: Track phụ đề (trang YouTube) · Đã lưu tạm');
+    const reloadButton = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === 'Tải lại transcript')!;
+    await act(async () => reloadButton.click());
+    expect(runtimeSendMessage).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: 'FETCH_TRANSCRIPT', videoId: 'dQw4w9WgXcQ', track: expect.objectContaining({ id: '.en' }), bypassCache: true,
+    }));
   });
 });

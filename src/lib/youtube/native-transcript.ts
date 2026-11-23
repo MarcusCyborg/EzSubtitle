@@ -121,26 +121,16 @@ export function nativeMenuEntries(value: unknown): NativeTranscriptMenuEntry[] {
   });
 }
 
-/** Maps the native menu to the player track list without reading opaque continuation tokens. */
+/** Native menu order is not evidence that two same-named tracks are interchangeable. */
 export function nativeMenuIndexForTrack(
   entries: NativeTranscriptMenuEntry[],
   playerTracks: TranscriptTrackSelector[],
   requestedTrack: TranscriptTrackSelector,
 ): number | null {
-  const exactTrackIndex = playerTracks.findIndex((track) => track.id === requestedTrack.id);
-  if (exactTrackIndex >= 0 && exactTrackIndex < entries.length && entries.length === playerTracks.length) {
-    return exactTrackIndex;
-  }
-
-  const requestedLanguage = normalized(requestedTrack.languageCode);
   const requestedLabel = normalized(requestedTrack.label);
-  const matchingPlayerIndexes = playerTracks.flatMap((track, index) => {
-    const sameLanguage = normalized(track.languageCode) === requestedLanguage;
-    const sameLabel = normalized(track.label) === requestedLabel;
-    return sameLanguage && sameLabel && index < entries.length ? [index] : [];
-  });
-  if (matchingPlayerIndexes.length === 1) return matchingPlayerIndexes[0] ?? null;
-
+  if (!requestedLabel || playerTracks.some((track) => (
+    track.id !== requestedTrack.id && normalized(track.label) === requestedLabel
+  ))) return null;
   const matchingLabels = entries.flatMap((entry, index) => (
     normalized(entry.title) === requestedLabel ? [index] : []
   ));

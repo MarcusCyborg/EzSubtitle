@@ -1,16 +1,15 @@
 import type { CaptionTrack, TranscriptSegment } from '../../types/transcript';
+import type { TranscriptProvenance } from '../../types/messages';
+import { captionTrackIdentity, captionTranslation } from '../youtube/caption-tracks';
 
+type CachedTranscript = { segments: TranscriptSegment[]; provenance: TranscriptProvenance };
 type CacheRecord = {
   schema: number;
-  videoId: string;
-  trackId: string;
-  languageCode: string;
-  baseUrl: string;
-  segments: TranscriptSegment[];
-  savedAt: number;
-};
+  identity: string;
+} & CachedTranscript;
 
-export const TRANSCRIPT_CACHE_SCHEMA = 2;
+export const TRANSCRIPT_CACHE_SCHEMA = 3;
+export const TRANSCRIPT_CACHE_TTL_MS = 30 * 60 * 1000;
 
 function identityHash(value: string): string {
   let hash = 0x811c9dc5;
@@ -21,9 +20,8 @@ function identityHash(value: string): string {
   return (hash >>> 0).toString(36);
 }
 
-export function cacheKey(videoId: string, track: CaptionTrack): string {
-  const identity = `${track.id}\u0000${track.languageCode}\u0000${track.baseUrl}`;
-  return `transcript:v${TRANSCRIPT_CACHE_SCHEMA}:${videoId}:${identityHash(identity)}`;
+export function cacheKey(videoId: string, track: CaptionTrack, tabId: number): string {
+  return `transcript:v${TRANSCRIPT_CACHE_SCHEMA}:${tabId}:${videoId}:${identityHash(captionTrackIdentity(track))}`;
 }
 
 function validSegments(value: unknown): value is TranscriptSegment[] {
@@ -38,30 +36,36 @@ function validSegments(value: unknown): value is TranscriptSegment[] {
   ));
 }
 
-export async function getCachedTranscript(videoId: string, track: CaptionTrack): Promise<TranscriptSegment[] | null> {
-  const key = cacheKey(videoId, track);
-  const result = await chrome.storage.session.get(key);
-  const record = result[key] as CacheRecord | undefined;
-  if (record?.schema !== TRANSCRIPT_CACHE_SCHEMA
-    || record.videoId !== videoId
-    || record.trackId !== track.id
-    || record.languageCode !== track.languageCode
-    || record.baseUrl !== track.baseUrl
-    || !validSegments(record.segments)) return null;
-  return record.segments;
+function cacheable(provenance: TranscriptProvenance | undefined): boolean {
+  return provenance?.source === 'background-timedtext' || provenance?.source === 'page-timedtext';
 }
 
-export async function cacheTranscript(videoId: string, track: CaptionTrack, segments: TranscriptSegment[]): Promise<void> {
-  if (!validSegments(segments)) return;
+export async function getCachedTranscript(videoId: string, track: CaptionTrack, tabId: number): Promise<CachedTranscript | null> {
+  const key = cacheKey(videoId, track, tabId);
+  const result = await chrome.storage.session.get(key);
+  const record = result[key] as CacheRecord | undefined;
+  const provenance = record?.provenance;
+  const age = Date.now() - (provenance?.fetchedAt ?? Number.NaN);
+  if (record?.schema !== TRANSCRIPT_CACHE_SCHEMA
+    || record.identity !== captionTrackIdentity(track)
+    || !provenance || !cacheable(provenance)
+    || provenance.videoId !== videoId
+    || provenance.trackId !== track.id
+    || provenance.languageCode !== track.languageCode
+    || provenance.translation !== captionTranslation(track)
+    || !Number.isFinite(age) || age < 0 || age >= TRANSCRIPT_CACHE_TTL_MS
+    || !validSegments(record.segments)) return null;
+  return { segments: record.segments, provenance: { ...provenance, cacheHit: true } };
+}
+
+export async function cacheTranscript(track: CaptionTrack, tabId: number, { segments, provenance }: CachedTranscript): Promise<void> {
+  if (!cacheable(provenance) || !validSegments(segments)) return;
   await chrome.storage.session.set({
-    [cacheKey(videoId, track)]: {
+    [cacheKey(provenance.videoId, track, tabId)]: {
       schema: TRANSCRIPT_CACHE_SCHEMA,
-      videoId,
-      trackId: track.id,
-      languageCode: track.languageCode,
-      baseUrl: track.baseUrl,
+      identity: captionTrackIdentity(track),
       segments,
-      savedAt: Date.now(),
+      provenance,
     } satisfies CacheRecord,
   });
 }

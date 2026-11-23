@@ -328,6 +328,63 @@ describe('MAIN-world transcript fallback', () => {
     )).resolves.toMatchObject({ ok: false, error: { code: 'EMPTY_RESPONSE' } });
   });
 
+  it('rejects a track switch that still identifies the old track in the response', async () => {
+    const transport = vi.fn(async () => new Response(transcriptBody('en', true)));
+    vi.stubGlobal('fetch', transport);
+    await expect(handlePageRequest(
+      endpointRequest({ id: '.vi', languageCode: 'vi', label: 'Tiếng Việt' }),
+      new AbortController().signal,
+    )).resolves.toMatchObject({ ok: false, error: { code: 'TRANSCRIPT_ENDPOINT_UNAVAILABLE' } });
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects explicit old-video endpoint data before posting', async () => {
+    Object.defineProperty(window, 'ytInitialData', {
+      configurable: true,
+      value: { currentVideoEndpoint: { watchEndpoint: { videoId: 'dQw4w9WgXcQ' } } },
+    });
+    const transport = vi.fn();
+    vi.stubGlobal('fetch', transport);
+    await expect(handlePageRequest(
+      endpointRequest({ id: '.en', languageCode: 'en', label: 'English' }),
+      new AbortController().signal,
+    )).resolves.toMatchObject({ ok: false, error: { code: 'TRANSCRIPT_ENDPOINT_UNAVAILABLE' } });
+    expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('reads srv3 on the page after empty JSON3 and skips the remaining format', async () => {
+    const xml = '<timedtext><body><p t="1234"><s>Xin chào 日本語</s></p></body></timedtext>';
+    const baseUrl = `https://www.youtube.com/api/timedtext?v=${VIDEO_ID}&lang=vi&variant=fixture`;
+    const transport = vi.fn()
+      .mockImplementationOnce(async () => new Response(''))
+      .mockImplementationOnce(async () => new Response(xml));
+    vi.stubGlobal('fetch', transport);
+
+    await expect(handlePageRequest(
+      { requestId, action: 'FETCH_TIMEDTEXT', videoId: VIDEO_ID, baseUrl },
+      new AbortController().signal,
+    )).resolves.toMatchObject({ ok: true, data: { bodies: [{ format: 'srv3', body: xml }] } });
+    expect(transport.mock.calls.map(([url]) => url)).toEqual([baseUrl + '&fmt=json3', baseUrl + '&fmt=srv3']);
+  });
+
+  it('cancels a stalled response body on navigation and does not try another format', async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({ cancel });
+    const transport = vi.fn(async () => new Response(stream));
+    vi.stubGlobal('fetch', transport);
+    const controller = new AbortController();
+    const pending = handlePageRequest({
+      requestId, action: 'FETCH_TIMEDTEXT', videoId: VIDEO_ID,
+      baseUrl: `https://www.youtube.com/api/timedtext?v=${VIDEO_ID}&lang=vi`,
+    }, controller.signal);
+    await Promise.resolve();
+    expect(stream.locked).toBe(true);
+    controller.abort();
+    await expect(pending).resolves.toMatchObject({ ok: false, error: { code: 'STALE_VIDEO' } });
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(transport).toHaveBeenCalledOnce();
+  });
+
   it('rejects a response after the tab navigates to another video', async () => {
     let finishRequest: ((response: Response) => void) | undefined;
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { finishRequest = resolve; })));

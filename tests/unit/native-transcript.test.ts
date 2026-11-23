@@ -85,11 +85,11 @@ describe('native YouTube transcript helpers', () => {
     });
   });
 
-  it('maps duplicate labels by the matching player track id and array position', () => {
+  it('matches a unique label without guessing between duplicate tracks or assuming menu order', () => {
     const entries = [
+      { title: 'Tiếng Việt', selected: false },
       { title: 'English', selected: true },
       { title: 'English', selected: false },
-      { title: 'Tiếng Việt', selected: false },
     ];
     const tracks = [
       { id: '.en', languageCode: 'en', label: 'English' },
@@ -97,7 +97,7 @@ describe('native YouTube transcript helpers', () => {
       { id: '.vi', languageCode: 'vi', label: 'Tiếng Việt' },
     ];
 
-    expect(nativeMenuIndexForTrack(entries, tracks, tracks[1]!)).toBe(1);
-    expect(nativeMenuIndexForTrack(entries, tracks, tracks[2]!)).toBe(2);
+    expect(nativeMenuIndexForTrack(entries, tracks, tracks[1]!)).toBeNull();
+    expect(nativeMenuIndexForTrack(entries, tracks, tracks[2]!)).toBe(0);
   });
 });

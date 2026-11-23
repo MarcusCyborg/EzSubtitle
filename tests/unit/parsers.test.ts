@@ -56,7 +56,7 @@ describe('caption parsers', () => {
     ]);
   });
 
-  it('drops invalid timing, avoids cue-group duplicates, and trims rolling captions', () => {
+  it('preserves independently timed endpoint text, including apparent repeats and prefixes', () => {
     const body = JSON.stringify({ items: [
       { transcriptSegmentRenderer: { startMs: '-1', snippet: { simpleText: 'Invalid' } } },
       { transcriptCueGroupRenderer: {
@@ -67,14 +67,23 @@ describe('caption parsers', () => {
       { transcriptSegmentRenderer: { startMs: '1400', snippet: { simpleText: 'Good morning' } } },
       { transcriptSegmentRenderer: { startMs: '1400', snippet: { simpleText: 'Good morning' } } },
       { transcriptSegmentRenderer: { startMs: '1800', snippet: { simpleText: 'Good morning everyone' } } },
+      { transcriptSegmentRenderer: { startMs: '2300', snippet: { simpleText: 'Good morning everyone' } } },
       { transcriptSegmentRenderer: { startMs: 'NaN', snippet: { simpleText: 'Text without timing' } } },
     ] });
 
     expect(inspectYoutubeiTranscript(body)).toMatchObject({ hasText: true, recognized: true });
     expect(parseYoutubeiTranscript(body)).toEqual([
       { startMs: 1_000, text: 'Good' },
-      { startMs: 1_400, text: 'morning' },
-      { startMs: 1_800, text: 'everyone' },
+      { startMs: 1_400, text: 'Good morning' },
+      { startMs: 1_800, text: 'Good morning everyone' },
+      { startMs: 2_300, text: 'Good morning everyone' },
     ]);
+  });
+
+  it('keeps repeated JSON3 speech after a window reset or an expired caption', () => {
+    const line = (tStartMs: number, dDurationMs?: number) => ({ tStartMs, dDurationMs, wWinId: 1, segs: [{ utf8: 'Again' }] });
+    expect(parseJson3Transcript(JSON.stringify({ events: [
+      line(0), { tStartMs: 500, id: 1 }, line(600, 400), line(1_001),
+    ] }))).toEqual([0, 600, 1_001].map((startMs) => ({ startMs, text: 'Again' })));
   });
 });

@@ -66,19 +66,33 @@ describe('transcript formatter', () => {
     ]);
   });
 
-  it('normalizes whitespace and entities without losing or repeating words', () => {
+  it('normalizes whitespace without re-decoding literal entities in parsed segment text', () => {
     const segments = [
-      { startMs: 0, text: 'Xin\n chào&#x20;' },
+      { startMs: 0, text: 'Xin\n chào &lt;' },
       { startMs: 4_000, text: 'thế giới…' },
       { startMs: 13_000, text: '“Một câu thông minh？”' },
     ];
     const blocks = groupReadableTranscript(segments);
-    const inputWords = segments.map((segment) => segment.text.replace('&#x20;', ' ')).join(' ').replace(/\s+/g, ' ').trim();
+    const inputWords = segments.map((segment) => segment.text).join(' ').replace(/\s+/g, ' ').trim();
     const outputWords = blocks.map((block) => block.text).join(' ').replace(/\s+/g, ' ').trim();
 
     expect(blocks[0]?.startMs).toBe(0);
     expect(outputWords).toBe(inputWords);
-    expect(outputWords).not.toContain('&#x20;');
+    expect(outputWords).toContain('&lt;');
+  });
+
+  it('exports every cue in a long lesson and keeps absolute timestamps and repeated speech', () => {
+    const segments = Array.from({ length: 2_400 }, (_, index) => ({
+      startMs: index * 4_000,
+      text: index % 2 === 0 ? '>> Xin chào 日本語。' : '>> Xin chào lần nữa.',
+    }));
+    const words = segments.map(({ text }) => text).join(' ');
+    const detailed = formatTranscript(segments, 'detailed');
+    const readable = formatTranscript(segments, 'readable');
+    expect(detailed.split('\n')).toEqual(segments.map(({ startMs, text }) => `[${formatTimestamp(startMs)}] ${text}`));
+    expect(readable.replace(/^\(\d+:\d+:[\d]+\) /gm, '').replace(/\s+/g, ' ')).toBe(words);
+    expect(readable.split('\n\n').map((block) => block.slice(0, 10)))
+      .toEqual(groupReadableTranscript(segments).map(({ startMs }) => `(${formatTimestamp(startMs)})`));
   });
 
   it('uses compact timestamps below one hour and full timestamps for long videos', () => {

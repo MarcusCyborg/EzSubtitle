@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { cacheKey, cacheTranscript, getCachedTranscript, TRANSCRIPT_CACHE_SCHEMA } from '../../src/lib/storage/transcript-cache';
+import { cacheKey, cacheTranscript, getCachedTranscript, TRANSCRIPT_CACHE_SCHEMA, TRANSCRIPT_CACHE_TTL_MS } from '../../src/lib/storage/transcript-cache';
+import { transcriptResult } from '../../src/lib/transcript/provenance';
 import type { CaptionTrack } from '../../src/types/transcript';
 
 const english: CaptionTrack = {
@@ -29,29 +30,46 @@ beforeEach(() => {
 });
 
 describe('transcript cache schema and ownership', () => {
+  const videoId = 'dQw4w9WgXcQ';
+  const segments = [{ startMs: 1_000, text: 'English only' }];
+
   it('ignores cache records from the old namespace', async () => {
-    storage['transcript:dQw4w9WgXcQ:.en'] = { segments: [{ startMs: 0, text: 'Mixed old cache' }] };
-    await expect(getCachedTranscript('dQw4w9WgXcQ', english)).resolves.toBeNull();
-    expect(cacheKey('dQw4w9WgXcQ', english)).toContain(`transcript:v${TRANSCRIPT_CACHE_SCHEMA}:`);
+    const key = cacheKey(videoId, english, 7);
+    storage[key] = { schema: 2, segments };
+    await expect(getCachedTranscript(videoId, english, 7)).resolves.toBeNull();
+    expect(key).toContain(`transcript:v${TRANSCRIPT_CACHE_SCHEMA}:`);
   });
 
-  it('keeps video and track identity in the record and never returns it for another track', async () => {
-    const segments = [{ startMs: 1_000, text: 'English only' }];
-    await cacheTranscript('dQw4w9WgXcQ', english, segments);
+  it('reuses a track after URL rotation without persisting credentials or mixing selection', async () => {
+    const original = { ...english, baseUrl: english.baseUrl + '&variant=example&expire=1&pot=temporary-secret' };
+    const renewed = { ...english, baseUrl: english.baseUrl + '&variant=example&expire=2&pot=other-secret' };
+    await cacheTranscript(original, 7, transcriptResult(segments, videoId, original, 'page-timedtext'));
 
-    await expect(getCachedTranscript('dQw4w9WgXcQ', english)).resolves.toEqual(segments);
-    await expect(getCachedTranscript('dQw4w9WgXcQ', vietnamese)).resolves.toBeNull();
-    expect(storage[cacheKey('dQw4w9WgXcQ', english)]).toMatchObject({
+    await expect(getCachedTranscript(videoId, renewed, 7)).resolves.toMatchObject({
+      segments, provenance: { cacheHit: true, source: 'page-timedtext' },
+    });
+    await expect(getCachedTranscript(videoId, vietnamese, 7)).resolves.toBeNull();
+    await expect(getCachedTranscript(videoId, english, 7)).resolves.toBeNull();
+    await expect(getCachedTranscript(videoId, renewed, 8)).resolves.toBeNull();
+    await expect(getCachedTranscript('9bZkp7q19f0', renewed, 7)).resolves.toBeNull();
+    await expect(getCachedTranscript(videoId, { ...renewed, baseUrl: renewed.baseUrl + '&tlang=vi' }, 7)).resolves.toBeNull();
+    expect(JSON.stringify(storage)).not.toMatch(/temporary-secret|other-secret|https:\/\//);
+    expect(storage[cacheKey(videoId, original, 7)]).toMatchObject({
       schema: TRANSCRIPT_CACHE_SCHEMA,
-      videoId: 'dQw4w9WgXcQ',
-      trackId: '.en',
-      languageCode: 'en',
+      provenance: { videoId, trackId: '.en', languageCode: 'en' },
     });
   });
 
-  it('does not cache empty or invalid transcript data', async () => {
-    await cacheTranscript('dQw4w9WgXcQ', english, []);
-    await cacheTranscript('dQw4w9WgXcQ', english, [{ startMs: -1, text: 'Invalid' }]);
+  it('does not reuse expired data or cache native sources and invalid timestamps', async () => {
+    const expired = transcriptResult(segments, videoId, english, 'background-timedtext');
+    expired.provenance.fetchedAt -= TRANSCRIPT_CACHE_TTL_MS;
+    await cacheTranscript(english, 7, expired);
+    await expect(getCachedTranscript(videoId, english, 7)).resolves.toBeNull();
+    storageSet.mockClear();
+    await cacheTranscript(english, 7, transcriptResult(segments, videoId, english, 'youtubei'));
+    await cacheTranscript(english, 7, transcriptResult(segments, videoId, english, 'native-dom'));
+    await cacheTranscript(english, 7, transcriptResult([], videoId, english, 'background-timedtext'));
+    await cacheTranscript(english, 7, transcriptResult([{ startMs: -1, text: 'Invalid' }], videoId, english, 'background-timedtext'));
     expect(storageSet).not.toHaveBeenCalled();
   });
 });

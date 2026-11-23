@@ -147,11 +147,7 @@ export function inspectTranscriptEndpoints(root: unknown): TranscriptEndpointIns
 }
 
 function normalized(value: string | null): string {
-  return (value ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function normalizedTrackId(value: string | null): string {
-  return normalized(value).replace(/^(a|asr) /, '');
+  return (value ?? '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ').trim();
 }
 
 export function trackMatchScore(candidate: TrackMetadata, track: TranscriptTrackSelector): number {
@@ -159,15 +155,11 @@ export function trackMatchScore(candidate: TrackMetadata, track: TranscriptTrack
   const candidateLanguage = normalized(candidate.languageCode);
   const requestedLabel = normalized(track.label);
   const candidateLabel = normalized(candidate.label);
-  const requestedId = normalizedTrackId(track.id);
-  const candidateId = normalizedTrackId(candidate.vssId);
-  let score = 0;
-  if (candidateLanguage && candidateLanguage === requestedLanguage) score += 8;
-  else if (candidateLanguage && (candidateLanguage.startsWith(`${requestedLanguage} `) || requestedLanguage.startsWith(`${candidateLanguage} `))) score += 5;
-  if (candidateId && candidateId === requestedId) score += 10;
-  if (candidateLabel && requestedLabel && candidateLabel === requestedLabel) score += 6;
-  else if (candidateLabel && requestedLabel && (candidateLabel.includes(requestedLabel) || requestedLabel.includes(candidateLabel))) score += 3;
-  return score;
+  if (candidateLanguage && candidateLanguage !== requestedLanguage) return 0;
+  if (candidate.vssId) return candidate.vssId === track.id ? 24 : 0;
+  // An English or Vietnamese label alone must still distinguish manual/ASR tracks.
+  if (!requestedLabel || requestedLabel !== candidateLabel) return 0;
+  return candidateLanguage ? 14 : 6;
 }
 
 export function responseMatchesTrack(inspection: TranscriptEndpointInspection, track: TranscriptTrackSelector): boolean {
@@ -183,5 +175,6 @@ export function endpointForTrack(
     .map((candidate) => ({ candidate, score: trackMatchScore(candidate, track) }))
     .filter(({ score }) => score >= 5)
     .sort((left, right) => right.score - left.score);
+  if (ranked[0]?.score === ranked[1]?.score) return null;
   return ranked[0]?.candidate ?? null;
 }

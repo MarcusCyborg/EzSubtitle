@@ -5,6 +5,7 @@ import { TranscriptPreview } from '../../src/components/TranscriptPreview';
 import { DEFAULT_OUTPUT_FORMAT, getStoredOutputFormat, storeOutputFormat } from '../../src/lib/storage/output-format';
 import { copyTranscriptText, downloadTranscriptText } from '../../src/lib/transcript/actions';
 import { formatTranscript } from '../../src/lib/transcript/format';
+import { transcriptSourceLabel } from '../../src/lib/transcript/provenance';
 import { selectDefaultTrack } from '../../src/lib/youtube/caption-tracks';
 import { isYouTubeVideoUrl } from '../../src/lib/youtube/video-id';
 import type { ContentRequest, RuntimeResponse, TranscriptResult, VideoContextResponse } from '../../src/types/messages';
@@ -32,7 +33,7 @@ export default function App() {
     transcript ? formatTranscript(transcript.segments, outputMode) : ''
   ), [outputMode, transcript]);
 
-  const loadTrack = useCallback(async (video: VideoContext, selectedTrack: CaptionTrack, tabId = sourceTabId.current) => {
+  const loadTrack = useCallback(async (video: VideoContext, selectedTrack: CaptionTrack, tabId = sourceTabId.current, bypassCache = false) => {
     const sequence = ++requestSequence.current;
     setLoading(true);
     setError(null);
@@ -41,6 +42,7 @@ export default function App() {
       const response = await chrome.runtime.sendMessage({
         type: 'FETCH_TRANSCRIPT', videoId: video.videoId, track: selectedTrack, trackCount: video.tracks.length,
         ...(typeof tabId === 'number' ? { tabId } : {}),
+        ...(bypassCache ? { bypassCache } : {}),
       }) as RuntimeResponse<TranscriptResult>;
       if (sequence !== requestSequence.current) return;
       if (!response?.ok) throw new Error(response?.error.message ?? 'Không thể tải phụ đề lúc này.');
@@ -155,6 +157,8 @@ export default function App() {
             <option value="detailed">Chi tiết</option>
           </select>
         </label>
+        {transcript && <p>{transcriptSourceLabel(transcript)} <button className="button button--secondary" type="button"
+          onClick={() => void loadTrack(context, track, sourceTabId.current, true)}>Tải lại transcript</button></p>}
         {transcript && <TranscriptPreview text={outputText} segmentCount={transcript.segments.length} />}
         {transcript && <div className="actions">
           <button className="button button--secondary" type="button" onClick={() => void copyTranscript()}>Sao chép subtitle</button>

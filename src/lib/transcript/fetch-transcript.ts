@@ -3,6 +3,7 @@ import { isTrustedCaptionUrl } from '../youtube/caption-tracks';
 import { TranscriptFetchError } from './errors';
 import { inspectJson3Transcript, type ParsedTranscript } from './parse-json3';
 import { inspectClassicXmlTranscript, inspectSrv3Transcript } from './parse-xml';
+import { fetchBoundedText } from './bounded-response';
 
 export { TranscriptFetchError } from './errors';
 
@@ -14,8 +15,6 @@ export type TimedTextBody = {
 };
 
 type Fetcher = typeof fetch;
-
-const strategies: readonly TimedTextFormat[] = ['json3', 'srv3', 'xml'];
 
 export function captionUrlWithFormat(baseUrl: string, format: TimedTextFormat): string {
   const url = new URL(baseUrl);
@@ -55,30 +54,23 @@ export function transcriptFromTimedTextBodies(bodies: TimedTextBody[]): Transcri
 export async function fetchTranscriptForTrack(
   track: CaptionTrack,
   transport: Fetcher = fetch,
+  signal = AbortSignal.timeout(8_000),
 ): Promise<TranscriptSegment[]> {
   if (!isTrustedCaptionUrl(track.baseUrl)) {
     throw new TranscriptFetchError('INVALID_CAPTION_URL');
   }
 
-  const bodies: TimedTextBody[] = [];
-  let sawNetworkFailure = false;
-  for (const format of strategies) {
-    try {
-      const response = await transport(captionUrlWithFormat(track.baseUrl, format), { credentials: 'include' });
-      if (!response.ok) continue;
-      const body = { format, body: await response.text() } satisfies TimedTextBody;
-      bodies.push(body);
-      try {
-        return transcriptFromTimedTextBodies([body]);
-      } catch (error) {
-        if (!(error instanceof TranscriptFetchError)) throw error;
-      }
-    } catch {
-      sawNetworkFailure = true;
+  // The MV3 worker has no DOMParser. XML belongs to the page fallback.
+  const format = 'json3';
+  let response: Awaited<ReturnType<typeof fetchBoundedText>>;
+  try {
+    response = await fetchBoundedText(transport, captionUrlWithFormat(track.baseUrl, format), {}, signal);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'RESPONSE_TOO_LARGE') {
+      throw new TranscriptFetchError('UNPARSEABLE_RESPONSE');
     }
+    throw new TranscriptFetchError('NETWORK_ERROR');
   }
-
-  if (!bodies.length && sawNetworkFailure) throw new TranscriptFetchError('NETWORK_ERROR');
-  if (!bodies.length) throw new TranscriptFetchError('CAPTION_UNAVAILABLE');
-  return transcriptFromTimedTextBodies(bodies);
+  if (!response.ok) throw new TranscriptFetchError('CAPTION_UNAVAILABLE');
+  return transcriptFromTimedTextBodies([{ format, body: response.body }]);
 }

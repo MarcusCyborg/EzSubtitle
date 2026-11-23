@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+// @vitest-environment node
+import { describe, expect, it, vi } from 'vitest';
 import { fetchTranscriptForTrack } from '../../src/lib/transcript/fetch-transcript';
 import type { CaptionTrack } from '../../src/types/transcript';
 
@@ -11,14 +12,22 @@ const track: CaptionTrack = {
 };
 
 describe('timedtext failure classification', () => {
-  it('does not mislabel empty timedtext responses as missing timestamps', async () => {
-    const transport = async () => new Response('', { status: 200 });
+  it('leaves XML to the page when the MV3 worker cannot parse it', async () => {
+    const transport = vi.fn(async () => new Response('', { status: 200 }));
     await expect(fetchTranscriptForTrack(track, transport as typeof fetch)).rejects.toMatchObject({ code: 'EMPTY_RESPONSE' });
+    expect(typeof globalThis.DOMParser).toBe('undefined');
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(transport).toHaveBeenCalledWith(expect.stringContaining('fmt=json3'), expect.anything());
   });
 
   it('uses MISSING_TIMESTAMP only after finding real caption text without a start time', async () => {
     const body = JSON.stringify({ events: [{ segs: [{ utf8: 'Caption without timing' }] }] });
     const transport = async () => new Response(body, { status: 200 });
     await expect(fetchTranscriptForTrack(track, transport as typeof fetch)).rejects.toMatchObject({ code: 'MISSING_TIMESTAMP' });
+  });
+
+  it('rejects a response over the byte limit even without Content-Length', async () => {
+    const transport = async () => new Response('語'.repeat(1_400_000));
+    await expect(fetchTranscriptForTrack(track, transport)).rejects.toMatchObject({ code: 'UNPARSEABLE_RESPONSE' });
   });
 });

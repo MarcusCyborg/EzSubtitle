@@ -4,11 +4,12 @@ import { DEFAULT_OUTPUT_FORMAT, getStoredOutputFormat, storeOutputFormat } from 
 import { copyTranscriptText, downloadTranscriptText } from '../transcript/actions';
 import { findActiveSegmentIndex } from '../transcript/active-segment';
 import { formatTimestamp, formatTranscript } from '../transcript/format';
+import { transcriptSourceLabel } from '../transcript/provenance';
 import { captionTrackDisplayLabel, selectDefaultTrack } from './caption-tracks';
 
 type PanelServices = {
   loadContext: () => Promise<VideoContextResponse>;
-  loadTranscript: (videoId: string, track: CaptionTrack, trackCount: number) => Promise<RuntimeResponse<TranscriptResult>>;
+  loadTranscript: (videoId: string, track: CaptionTrack, trackCount: number, bypassCache?: boolean) => Promise<RuntimeResponse<TranscriptResult>>;
 };
 
 type PanelState = {
@@ -255,7 +256,7 @@ export class YoutubeTranscriptPanel {
     }
   }
 
-  private async loadTrack(context: VideoContext, track: CaptionTrack): Promise<void> {
+  private async loadTrack(context: VideoContext, track: CaptionTrack, bypassCache = false): Promise<void> {
     const sequence = ++this.sequence;
     this.activeIndex = -1;
     this.searchCursor = -1;
@@ -263,7 +264,7 @@ export class YoutubeTranscriptPanel {
     this.state = { ...this.state, selectedTrack: track, loading: true, error: null, transcript: null };
     this.render();
     try {
-      const response = await this.services.loadTranscript(context.videoId, track, context.tracks.length);
+      const response = await this.services.loadTranscript(context.videoId, track, context.tracks.length, ...(bypassCache ? [true] as const : []));
       if (sequence !== this.sequence) return;
       if (!response.ok) throw new Error(response.error.message);
       this.state = { ...this.state, transcript: response.data, loading: false };
@@ -663,6 +664,19 @@ export class YoutubeTranscriptPanel {
       body.append(empty);
       return body;
     }
+    const source = document.createElement('div');
+    source.className = 'status';
+    source.textContent = transcriptSourceLabel(this.state.transcript);
+    const reload = document.createElement('button');
+    reload.type = 'button';
+    reload.className = 'retry';
+    reload.textContent = 'Tải lại transcript';
+    reload.addEventListener('click', () => {
+      const { context, selectedTrack } = this.state;
+      if (context && selectedTrack) void this.loadTrack(context, selectedTrack, true);
+    });
+    source.append(' ', reload);
+    body.append(source);
 
     const search = document.createElement('div');
     search.className = 'search';

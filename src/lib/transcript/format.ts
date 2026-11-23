@@ -1,5 +1,4 @@
 import type { TranscriptOutputMode, TranscriptSegment } from '../../types/transcript';
-import { normalizeCaptionText } from './normalize';
 
 const READABLE_MIN_DURATION_MS = 12_000;
 const READABLE_MAX_DURATION_MS = 30_000;
@@ -31,7 +30,7 @@ export function groupReadableTranscript(segments: TranscriptSegment[]): Transcri
   };
 
   for (const segment of segments) {
-    const text = normalizeCaptionText(segment.text);
+    const text = segment.text.replace(/[\t\n\f\r ]+/g, ' ').trim();
     if (!text) continue;
     if (!block) {
       block = { startMs: segment.startMs, text };

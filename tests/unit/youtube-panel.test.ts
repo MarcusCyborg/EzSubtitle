@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { YoutubeTranscriptPanel } from '../../src/lib/youtube/youtube-panel';
+import { transcriptResult } from '../../src/lib/transcript/provenance';
 import type { RuntimeResponse, TranscriptResult, VideoContextResponse } from '../../src/types/messages';
 import type { CaptionTrack, VideoContext } from '../../src/types/transcript';
 
@@ -17,18 +18,15 @@ const context = (title: string, tracks = [english, vietnamese]): VideoContext =>
 });
 const transcript = (text: string): RuntimeResponse<TranscriptResult> => ({
   ok: true,
-  data: { segments: [{ startMs: 1_000, text }], text: `[00:00:01] ${text}` },
+  data: transcriptResult([{ startMs: 1_000, text }], 'dQw4w9WgXcQ', english, 'background-timedtext'),
 });
 const multiTranscript = (): RuntimeResponse<TranscriptResult> => ({
   ok: true,
-  data: {
-    segments: [
+  data: transcriptResult([
       { startMs: 1_000, text: 'First' },
       { startMs: 7_000, text: 'sentence.' },
       { startMs: 14_000, text: 'Next block.' },
-    ],
-    text: '[00:00:01] First\n[00:00:07] sentence.\n[00:00:14] Next block.',
-  },
+  ], 'dQw4w9WgXcQ', english, 'background-timedtext'),
 });
 const successContext = (value: VideoContext): VideoContextResponse => ({ ok: true, data: value });
 
@@ -333,11 +331,15 @@ describe('YouTube panel lifecycle', () => {
     panel.start();
     await settle();
     const root = panelRoot();
+    const search = root.querySelector<HTMLInputElement>('[aria-label="Tìm trong transcript"]')!;
+    search.value = 'sentence';
+    search.dispatchEvent(new Event('input'));
     root.querySelector<HTMLButtonElement>('[title="Sao chép transcript"]')?.click();
     root.querySelector<HTMLButtonElement>('[title="Tải transcript .txt"]')?.click();
     await settle();
 
     const clipboardText = vi.mocked(navigator.clipboard.writeText).mock.calls.at(-1)?.[0];
+    expect(clipboardText).toBe('(00:01) First sentence.\n\n(00:14) Next block.');
     expect(downloadedText).toBe(clipboardText);
   });
 });
