@@ -7,9 +7,25 @@ import { attachDraftToTab, claimDraftForTab, createPendingDraft, removeClaimedDr
 import { captionTrackMatchesVideo, captionTranslation, isCaptionTrack } from '../src/lib/youtube/caption-tracks';
 import { isValidVideoId, parseVideoId } from '../src/lib/youtube/video-id';
 import type { RuntimeRequest, RuntimeResponse, TranscriptResult } from '../src/types/messages';
+import type { CaptionTrack } from '../src/types/transcript';
 
 function failure(code: string, message: string): RuntimeResponse<never> {
   return { ok: false, error: { code, message } };
+}
+
+function probePlayerTranscript(tabId: number, videoId: string, track: CaptionTrack, navigation: AbortSignal) {
+  const signal = AbortSignal.any([navigation, AbortSignal.timeout(1_500)]);
+  return new Promise<RuntimeResponse<TranscriptResult> | null>((resolve) => {
+    if (signal.aborted) return resolve(null);
+    const onAbort = () => resolve(null);
+    signal.addEventListener('abort', onAbort, { once: true });
+    const finish = (response: RuntimeResponse<TranscriptResult> | null) => {
+      signal.removeEventListener('abort', onAbort);
+      resolve(response);
+    };
+    void chrome.tabs.sendMessage(tabId, { type: 'GET_PLAYER_TRANSCRIPT', videoId, track })
+      .then(finish, () => finish(null));
+  });
 }
 
 async function handleFetchTranscript(
@@ -47,14 +63,28 @@ async function handleFetchTranscript(
     }
   };
   const stale = () => failure('STALE_VIDEO', 'Tab YouTube đã chuyển sang video khác.');
+  const matchesSelection = (data: TranscriptResult) => {
+    const provenance = data?.provenance;
+    return provenance && provenance.videoId === videoId && provenance.trackId === track.id
+      && provenance.languageCode === track.languageCode && provenance.translation === captionTranslation(track);
+  };
   const complete = async (data: TranscriptResult): Promise<RuntimeResponse<TranscriptResult>> => {
     if (!await tabStillOnVideo()) return stale();
-    if (!data.provenance.cacheHit) await cacheTranscript(track, tabId, data).catch(() => undefined);
+    if (data.provenance.source !== 'player-timedtext' && !data.provenance.cacheHit) {
+      await cacheTranscript(track, tabId, data).catch(() => undefined);
+    }
     if (navigation.signal.aborted) return stale();
-    return { ok: true, data };
+    return { ok: true, data: data.provenance.source === 'player-timedtext' ? data : {
+      ...data, provenance: { ...data.provenance, fallbackErrors: ['PLAYER_CC_UNAVAILABLE', ...data.provenance.fallbackErrors] },
+    } };
   };
   try {
     if (!await tabStillOnVideo()) return stale();
+    // A current player response can replace even a successful metadata cache hit.
+    const player = await probePlayerTranscript(tabId, videoId, track, navigation.signal).catch(() => null);
+    if (navigation.signal.aborted || (player?.ok === false && player.error?.code === 'STALE_VIDEO')) return stale();
+    if (player?.ok && matchesSelection(player.data) && player.data.provenance.source === 'player-timedtext'
+      && !player.data.provenance.cacheHit && player.data.segments?.length > 0) return await complete(player.data);
     const cached = bypassCache === true ? null : await getCachedTranscript(videoId, track, tabId).catch(() => null);
     if (cached) return await complete({ ...cached, text: formatTranscript(cached.segments) });
     let directError: TranscriptFetchError;
@@ -75,8 +105,7 @@ async function handleFetchTranscript(
       }) as RuntimeResponse<TranscriptResult>;
       if (!fallback?.ok) return failure(fallback?.error.code ?? directError.code, fallback?.error.message ?? directError.message);
       const provenance = fallback.data.provenance;
-      if (!provenance || provenance.videoId !== videoId || provenance.trackId !== track.id
-        || provenance.languageCode !== track.languageCode || provenance.translation !== captionTranslation(track)
+      if (!matchesSelection(fallback.data)
         || !['page-timedtext', 'youtubei', 'native-dom'].includes(provenance.source)) {
         return failure('CAPTION_UNAVAILABLE', 'Kết quả dự phòng không khớp track nguồn.');
       }

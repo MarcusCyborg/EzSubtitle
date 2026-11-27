@@ -16,6 +16,7 @@ let nativeErrorCode = 'TRANSCRIPT_ENDPOINT_UNAVAILABLE';
 let nativeSegments: Array<{ startMs: number; text: string }> = [];
 let nativeIsOnlyTrack = false;
 let nativeRequests = 0;
+let playerCapture: { segments: Array<{ startMs: number; text: string }>; observedAt: number } | null = null;
 
 beforeAll(async () => {
   vi.stubGlobal('defineContentScript', (value: ContentDefinition) => {
@@ -30,6 +31,14 @@ beforeAll(async () => {
   });
   window.addEventListener('ezsubtitle:page-request', (event) => {
     const request = (event as CustomEvent<{ requestId: string; action: string; isOnlyTrack?: boolean }>).detail;
+    if (request.action === 'GET_PLAYER_TRANSCRIPT') {
+      window.dispatchEvent(new CustomEvent('ezsubtitle:page-response', {
+        detail: playerCapture
+          ? { requestId: request.requestId, action: request.action, ok: true, data: playerCapture }
+          : { requestId: request.requestId, action: request.action, ok: false, error: { code: 'PLAYER_CC_UNAVAILABLE', message: 'No capture.' } },
+      }));
+      return;
+    }
     if (request.action === 'FETCH_TIMEDTEXT') {
       window.dispatchEvent(new CustomEvent('ezsubtitle:page-response', {
         detail: { requestId: request.requestId, action: request.action, ok: true, data: { bodies: [], networkFailure: false } },
@@ -79,6 +88,7 @@ beforeEach(() => {
   nativeSegments = [];
   nativeIsOnlyTrack = false;
   nativeRequests = 0;
+  playerCapture = null;
   snapshot = {
     videoDetails: { videoId: 'dQw4w9WgXcQ', title: 'Fixture video' },
     captions: { playerCaptionsTracklistRenderer: { captionTracks: [
@@ -120,6 +130,21 @@ function renderVisibleTranscript(): HTMLElement {
 }
 
 describe('YouTube content bridge mock', () => {
+  it('returns only a captured, timestamped player result for the requested track and retains its capture time', async () => {
+    const getPlayer = () => new Promise((resolve) => {
+      onRuntimeMessage?.({ type: 'GET_PLAYER_TRANSCRIPT', videoId: 'dQw4w9WgXcQ', track: domTrack }, {}, resolve);
+    });
+    await expect(getPlayer()).resolves.toMatchObject({ ok: false, error: { code: 'PLAYER_CC_UNAVAILABLE' } });
+    playerCapture = { segments: [{ startMs: 0, text: 'Player transcript' }], observedAt: Date.now() - 500 };
+    await expect(getPlayer()).resolves.toMatchObject({
+      ok: true,
+      data: { segments: playerCapture.segments, provenance: {
+        source: 'player-timedtext', trackId: '.vi', fetchedAt: playerCapture.observedAt, cacheHit: false,
+      } },
+    });
+    expect(nativeRequests).toBe(0);
+  });
+
   it('recovers the visible timeline transcript when the MAIN-world bridge cannot open the old panel', async () => {
     document.body.innerHTML = readFileSync(resolve('tests/fixtures/native-timeline.html'), 'utf8');
     endpointUnavailable = true;

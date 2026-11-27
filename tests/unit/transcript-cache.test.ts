@@ -35,7 +35,7 @@ describe('transcript cache schema and ownership', () => {
 
   it('ignores cache records from the old namespace', async () => {
     const key = cacheKey(videoId, english, 7);
-    storage[key] = { schema: 2, segments };
+    storage[key] = { schema: 3, segments };
     await expect(getCachedTranscript(videoId, english, 7)).resolves.toBeNull();
     expect(key).toContain(`transcript:v${TRANSCRIPT_CACHE_SCHEMA}:`);
   });
@@ -71,5 +71,13 @@ describe('transcript cache schema and ownership', () => {
     await cacheTranscript(english, 7, transcriptResult([], videoId, english, 'background-timedtext'));
     await cacheTranscript(english, 7, transcriptResult([{ startMs: -1, text: 'Invalid' }], videoId, english, 'background-timedtext'));
     expect(storageSet).not.toHaveBeenCalled();
+  });
+
+  it.each(['exp', 'xoaf', 'xowf', 'xowatf', 'xospf'])('separates metadata cache entries by the unverified option %s', async (key) => {
+    const selected = { ...english, baseUrl: `${english.baseUrl}&${key}=synthetic` };
+    await cacheTranscript(selected, 7, transcriptResult(segments, videoId, selected, 'page-timedtext'));
+    await expect(getCachedTranscript(videoId, selected, 7)).resolves.toMatchObject({ segments });
+    await expect(getCachedTranscript(videoId, english, 7)).resolves.toBeNull();
+    await expect(getCachedTranscript(videoId, { ...english, baseUrl: `${english.baseUrl}&${key}=changed` }, 7)).resolves.toBeNull();
   });
 });

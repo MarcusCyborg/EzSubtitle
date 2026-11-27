@@ -22,6 +22,7 @@ import {
   type PageBridgeResponse,
 } from '../src/lib/youtube/page-bridge';
 import { parsePlayerResponseJson } from '../src/lib/youtube/player-response';
+import { observePlayerCaptions, PLAYER_CC_DIAGNOSTIC_EVENT } from '../src/lib/youtube/player-captions';
 import {
   endpointForTrack,
   inspectTranscriptEndpoints,
@@ -504,7 +505,7 @@ function currentYoutubeConfig(): {
   };
 }
 
-async function fetchPageTimedText(request: Extract<PageBridgeRequest, { action: 'FETCH_TIMEDTEXT' }>, signal: AbortSignal): Promise<PageBridgeResponse> {
+async function fetchPageTimedText(request: Extract<PageBridgeRequest, { action: 'FETCH_TIMEDTEXT' }>, signal: AbortSignal, transport: typeof fetch): Promise<PageBridgeResponse> {
   if (!isCurrentVideo(request.videoId)) return failure(request, 'STALE_VIDEO', 'Video đã thay đổi trước khi request bắt đầu.');
   if (!isTrustedCaptionUrl(request.baseUrl) || !captionUrlMatchesVideoId(request.baseUrl, request.videoId)) {
     return failure(request, 'INVALID_CAPTION_URL', 'Đường dẫn phụ đề không thuộc video hiện tại.');
@@ -516,7 +517,7 @@ async function fetchPageTimedText(request: Extract<PageBridgeRequest, { action: 
   for (const format of formats) {
     try {
       const perFormat = AbortSignal.any([deadline, AbortSignal.timeout(4_000)]);
-      const response = await fetchBoundedText(fetch, captionUrlWithFormat(request.baseUrl, format), {}, perFormat);
+      const response = await fetchBoundedText(transport, captionUrlWithFormat(request.baseUrl, format), {}, perFormat);
       if (signal.aborted || !isCurrentVideo(request.videoId)) return failure(request, 'STALE_VIDEO', 'Video đã thay đổi khi transcript đang tải.');
       if (!response.ok) continue;
       const candidate = { format, body: response.body };
@@ -543,7 +544,7 @@ async function fetchPageTimedText(request: Extract<PageBridgeRequest, { action: 
 
 type YoutubeiConfig = NonNullable<ReturnType<typeof currentYoutubeConfig>>;
 
-async function postTranscriptEndpoint(params: string, config: YoutubeiConfig, signal: AbortSignal): Promise<{ body: string; ok: boolean }> {
+async function postTranscriptEndpoint(params: string, config: YoutubeiConfig, signal: AbortSignal, transport: typeof fetch): Promise<{ body: string; ok: boolean }> {
   if (!isTranscriptEndpointParams(params)) throw new Error('INVALID_ENDPOINT_PARAMS');
   const url = new URL('/youtubei/v1/get_transcript', window.location.origin);
   url.searchParams.set('prettyPrint', 'false');
@@ -554,7 +555,7 @@ async function postTranscriptEndpoint(params: string, config: YoutubeiConfig, si
     'x-youtube-client-version': config.clientVersion,
   };
   if (config.visitorData) headers['x-goog-visitor-id'] = config.visitorData;
-  return fetchBoundedText(fetch, url.toString(), {
+  return fetchBoundedText(transport, url.toString(), {
     method: 'POST',
     headers,
     body: JSON.stringify({ context: config.context, params }),
@@ -573,6 +574,7 @@ function parseYoutubeiBody(body: string): unknown | null {
 async function fetchTranscriptEndpoint(
   request: Extract<PageBridgeRequest, { action: 'FETCH_TRANSCRIPT_ENDPOINT' }>,
   signal: AbortSignal,
+  transport: typeof fetch,
 ): Promise<PageBridgeResponse> {
   if (!isCurrentVideo(request.videoId)) return failure(request, 'STALE_VIDEO', 'Video đã thay đổi trước khi request bắt đầu.');
   const initialData = initialDataSnapshot();
@@ -589,7 +591,7 @@ async function fetchTranscriptEndpoint(
   }
   try {
     const deadline = AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
-    const defaultResponse = await postTranscriptEndpoint(initialEndpoint.params, config, deadline);
+    const defaultResponse = await postTranscriptEndpoint(initialEndpoint.params, config, deadline, transport);
     if (signal.aborted || !isCurrentVideo(request.videoId)) return failure(request, 'STALE_VIDEO', 'Video đã thay đổi khi transcript đang tải.');
     if (!defaultResponse.ok) return failure(request, 'TRANSCRIPT_ENDPOINT_UNAVAILABLE', 'Transcript endpoint mặc định của YouTube không khả dụng.');
     if (!defaultResponse.body.trim()) return failure(request, 'EMPTY_RESPONSE', 'YouTube trả về transcript rỗng.');
@@ -603,7 +605,7 @@ async function fetchTranscriptEndpoint(
     if (!selectedEndpoint || selectedEndpoint.params === initialEndpoint.params) {
       return failure(request, 'TRANSCRIPT_ENDPOINT_UNAVAILABLE', 'Response transcript không có endpoint cho track đã chọn.');
     }
-    const selectedResponse = await postTranscriptEndpoint(selectedEndpoint.params, config, deadline);
+    const selectedResponse = await postTranscriptEndpoint(selectedEndpoint.params, config, deadline, transport);
     if (signal.aborted || !isCurrentVideo(request.videoId)) return failure(request, 'STALE_VIDEO', 'Video đã thay đổi khi transcript đang tải.');
     if (!selectedResponse.ok) return failure(request, 'TRANSCRIPT_ENDPOINT_UNAVAILABLE', 'Transcript endpoint của track đã chọn không khả dụng.');
     if (!selectedResponse.body.trim()) return failure(request, 'EMPTY_RESPONSE', 'YouTube trả về transcript rỗng cho track đã chọn.');
@@ -629,13 +631,23 @@ async function fetchTranscriptEndpoint(
   }
 }
 
-async function handlePageRequest(request: PageBridgeRequest, signal: AbortSignal): Promise<PageBridgeResponse> {
+async function handlePageRequest(
+  request: PageBridgeRequest, signal: AbortSignal,
+  playerCaptions?: Pick<ReturnType<typeof observePlayerCaptions>, 'read' | 'extensionFetch'>,
+): Promise<PageBridgeResponse> {
   if (request.action === 'GET_SNAPSHOT') {
     if (!isCurrentVideo(request.videoId)) return failure(request, 'STALE_VIDEO', 'URL video đã thay đổi.');
     return { requestId: request.requestId, action: request.action, ok: true, data: { snapshot: onlyNeededFields(playerSnapshot(request.videoId), request.videoId) } };
   }
-  if (request.action === 'FETCH_TIMEDTEXT') return fetchPageTimedText(request, signal);
-  if (request.action === 'FETCH_TRANSCRIPT_ENDPOINT') return fetchTranscriptEndpoint(request, signal);
+  if (request.action === 'GET_PLAYER_TRANSCRIPT') {
+    if (signal.aborted || !isCurrentVideo(request.videoId)) return failure(request, 'STALE_VIDEO', 'URL video đã thay đổi.');
+    const data = playerCaptions?.read(request.videoId, request.track);
+    if (!data) return failure(request, 'PLAYER_CC_UNAVAILABLE', 'Chưa có CC player phù hợp.');
+    return { requestId: request.requestId, action: request.action, ok: true, data };
+  }
+  const transport = playerCaptions?.extensionFetch ?? fetch;
+  if (request.action === 'FETCH_TIMEDTEXT') return fetchPageTimedText(request, signal, transport);
+  if (request.action === 'FETCH_TRANSCRIPT_ENDPOINT') return fetchTranscriptEndpoint(request, signal, transport);
   return readNativeTranscript(request, signal);
 }
 
@@ -644,6 +656,16 @@ export default defineContentScript({
   world: 'MAIN',
   runAt: 'document_start',
   main() {
+    const installPlayerObserver = () => {
+      if (typeof Error.captureStackTrace !== 'function') return undefined;
+      try {
+        return observePlayerCaptions(window, () => parseVideoId(window.location.href), (videoId) => {
+          const player = document.querySelector<YouTubePlayer>('#movie_player');
+          return captionTracksFromPlayerResponse(matchingPlayerSnapshot(player?.getPlayerResponse?.(), videoId));
+        });
+      } catch { return undefined; }
+    };
+    const playerCaptions = installPlayerObserver();
     const activeRequests = new Map<string, AbortController>();
     const abortActiveRequests = () => {
       for (const controller of activeRequests.values()) controller.abort();
@@ -655,22 +677,28 @@ export default defineContentScript({
       if (activeRequests.has(request.requestId)) return;
       const controller = new AbortController();
       activeRequests.set(request.requestId, controller);
-      void handlePageRequest(request, controller.signal)
+      void handlePageRequest(request, controller.signal, playerCaptions)
         .then((response) => window.dispatchEvent(new CustomEvent(PAGE_RESPONSE_EVENT, { detail: response })))
         .catch((error: unknown) => window.dispatchEvent(new CustomEvent(PAGE_RESPONSE_EVENT, {
           detail: failure(request, 'UNEXPECTED_ERROR', error instanceof Error ? error.message.slice(0, 250) : 'Không thể đọc transcript từ trang YouTube.'),
         })))
         .finally(() => activeRequests.delete(request.requestId));
     };
+    const onNavigationStart = () => { abortActiveRequests(); playerCaptions?.startNavigation(); };
+    const onNavigationFinish = () => { abortActiveRequests(); playerCaptions?.finishNavigation(); };
+    const onDiagnostic = () => console.table(playerCaptions?.diagnostics() ?? [{ result: 'OBSERVER_UNAVAILABLE' }]);
     const cleanup = () => {
       abortActiveRequests();
+      playerCaptions?.dispose();
       window.removeEventListener(PAGE_REQUEST_EVENT, onRequest);
-      window.removeEventListener('yt-navigate-start', abortActiveRequests);
-      window.removeEventListener('yt-navigate-finish', abortActiveRequests);
+      window.removeEventListener('yt-navigate-start', onNavigationStart);
+      window.removeEventListener('yt-navigate-finish', onNavigationFinish);
+      window.removeEventListener(PLAYER_CC_DIAGNOSTIC_EVENT, onDiagnostic);
     };
     window.addEventListener(PAGE_REQUEST_EVENT, onRequest);
-    window.addEventListener('yt-navigate-start', abortActiveRequests);
-    window.addEventListener('yt-navigate-finish', abortActiveRequests);
+    window.addEventListener('yt-navigate-start', onNavigationStart);
+    window.addEventListener('yt-navigate-finish', onNavigationFinish);
+    window.addEventListener(PLAYER_CC_DIAGNOSTIC_EVENT, onDiagnostic);
     window.addEventListener('pagehide', cleanup, { once: true });
   },
 });

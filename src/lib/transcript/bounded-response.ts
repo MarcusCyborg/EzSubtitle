@@ -1,10 +1,14 @@
-const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+export const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 
 export async function fetchBoundedText(
   transport: typeof fetch, url: string, init: RequestInit, signal: AbortSignal,
 ): Promise<{ status: number; ok: boolean; body: string }> {
   signal.throwIfAborted();
   const response = await transport(url, { ...init, credentials: 'include', redirect: 'error', signal });
+  return readBoundedText(response, signal);
+}
+
+export async function readBoundedText(response: Response, signal: AbortSignal): Promise<{ status: number; ok: boolean; body: string }> {
   if (!response.ok || Number(response.headers.get('content-length')) > MAX_RESPONSE_BYTES) {
     void response.body?.cancel().catch(() => undefined);
     if (response.ok) throw new Error('RESPONSE_TOO_LARGE');

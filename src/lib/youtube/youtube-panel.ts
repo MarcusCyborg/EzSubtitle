@@ -24,7 +24,6 @@ type PanelState = {
   error: string | null;
 };
 
-const STORAGE_KEY = 'youtubePanelExpanded';
 const HOST_ID = 'ezsubtitle-youtube-panel-host';
 const LONG_TRANSCRIPT_CHARS = 20_000;
 
@@ -124,6 +123,7 @@ export class YoutubeTranscriptPanel {
   private activeIndex = -1;
   private feedbackTimer: number | null = null;
   private host: HTMLElement | null = null;
+  private logoUrl = '';
   private observer: MutationObserver | null = null;
   private root: ShadowRoot | null = null;
   private scheduledMount = false;
@@ -156,7 +156,7 @@ export class YoutubeTranscriptPanel {
     });
     this.observer.observe(document.documentElement, { childList: true, subtree: true });
     window.addEventListener('yt-navigate-finish', this.handleNavigation);
-    void this.restoreExpandedState();
+    void this.restoreOutputFormat();
     this.ensureMounted();
   }
 
@@ -178,10 +178,9 @@ export class YoutubeTranscriptPanel {
     this.searchMatches = [];
     this.searchQuery = '';
     this.detachVideo();
-    this.state = { ...this.state, context: null, selectedTrack: null, transcript: null, feedback: null, error: null, loading: false };
+    this.state = { ...this.state, expanded: false, context: null, selectedTrack: null, transcript: null, feedback: null, error: null, loading: false };
     this.render();
     this.scheduleMount();
-    if (this.state.expanded) void this.loadContext();
   };
 
   private scheduleMount(): void {
@@ -215,25 +214,21 @@ export class YoutubeTranscriptPanel {
   }
 
   private createHost(): void {
+    this.logoUrl = chrome.runtime.getURL('icon/32.png');
     this.host = document.createElement('section');
     this.host.id = HOST_ID;
     this.host.setAttribute('aria-label', 'EzSubtitle transcript panel');
     this.root = this.host.attachShadow({ mode: 'open' });
   }
 
-  private async restoreExpandedState(): Promise<void> {
+  private async restoreOutputFormat(): Promise<void> {
     try {
-      const [stored, outputMode] = await Promise.all([
-        chrome.storage.local.get(STORAGE_KEY),
-        getStoredOutputFormat(),
-      ]);
-      if (typeof stored[STORAGE_KEY] === 'boolean') this.state.expanded = stored[STORAGE_KEY] as boolean;
-      this.state.outputMode = outputMode;
+      const outputMode = await getStoredOutputFormat();
+      this.state = { ...this.state, outputMode };
     } catch {
-      this.setFeedback('Không thể lưu trạng thái panel trên trình duyệt này.', 'error');
+      this.setFeedback('Không thể đọc định dạng xuất đã lưu.', 'error');
     }
     this.render();
-    if (this.state.expanded && !this.state.context && !this.state.loading) void this.loadContext();
   }
 
   private async loadContext(): Promise<void> {
@@ -279,9 +274,6 @@ export class YoutubeTranscriptPanel {
 
   private toggleExpanded = (): void => {
     this.state = { ...this.state, expanded: !this.state.expanded };
-    void chrome.storage.local.set({ [STORAGE_KEY]: this.state.expanded }).catch(() => {
-      this.setFeedback('Không thể lưu trạng thái mở/đóng panel.', 'error');
-    });
     this.render();
     if (this.state.expanded && !this.state.context && !this.state.loading) void this.loadContext();
   };
@@ -393,7 +385,6 @@ export class YoutubeTranscriptPanel {
     if (!this.state.transcript) {
       if (!this.state.expanded) {
         this.state = { ...this.state, expanded: true };
-        void chrome.storage.local.set({ [STORAGE_KEY]: true }).catch(() => undefined);
         this.render();
       }
       if (!this.state.loading) await this.loadContext();
@@ -525,7 +516,7 @@ export class YoutubeTranscriptPanel {
     header.addEventListener('click', this.toggleExpanded);
     const logo = document.createElement('img');
     logo.className = 'logo';
-    logo.src = chrome.runtime.getURL('icon/32.png');
+    logo.src = this.logoUrl;
     logo.alt = '';
     const brand = document.createElement('span');
     brand.className = 'brand';

@@ -45,6 +45,13 @@ function panelRoot(): ShadowRoot {
   return host.shadowRoot;
 }
 
+async function startExpandedPanel(): Promise<void> {
+  panel!.start();
+  await settle();
+  panelRoot().querySelector<HTMLButtonElement>('.header')!.click();
+  await settle();
+}
+
 beforeEach(() => {
   runtimeSendMessage.mockClear();
   document.body.innerHTML = '<ytd-watch-flexy><div id="secondary"><div id="secondary-inner"></div></div></ytd-watch-flexy><video class="html5-main-video"></video>';
@@ -77,8 +84,9 @@ afterEach(() => {
 });
 
 describe('YouTube panel lifecycle', () => {
-  it('starts collapsed by default and loads only after the user expands it', async () => {
-    vi.mocked(chrome.storage.local.get as (key: string) => Promise<Record<string, unknown>>).mockResolvedValue({});
+  it.each([undefined, true, false])('starts collapsed even with legacy expanded state %s and loads only on demand', async (expanded) => {
+    vi.mocked(chrome.storage.local.get as (key: string) => Promise<Record<string, unknown>>)
+      .mockResolvedValue({ youtubePanelExpanded: expanded });
     const loadContext = vi.fn(async () => successContext(context('Fixture')));
     panel = new YoutubeTranscriptPanel({
       loadContext,
@@ -101,18 +109,85 @@ describe('YouTube panel lifecycle', () => {
     expect(loadContext).toHaveBeenCalledOnce();
   });
 
+  it('lets both header controls toggle without extension APIs after the transcript loads', async () => {
+    const loadTranscript = vi.fn(async () => transcript('Hello'));
+    panel = new YoutubeTranscriptPanel({
+      loadContext: async () => successContext(context('Fixture')),
+      loadTranscript,
+    });
+    await startExpandedPanel();
+
+    const unavailable = () => { throw new Error('Extension context invalidated.'); };
+    vi.mocked(chrome.storage.local.set).mockImplementation(unavailable);
+    vi.spyOn(chrome.runtime, 'getURL').mockImplementation(unavailable);
+
+    for (const [selector, expanded] of [
+      ['.header-chevron path', false],
+      ['.brand', true],
+      ['.header-chevron', false],
+      ['.header', true],
+    ] as const) {
+      panelRoot().querySelector(selector)!.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+      expect(panelRoot().querySelector('.header')?.getAttribute('aria-expanded')).toBe(String(expanded));
+      expect(panelRoot().querySelector('.header-chevron')?.getAttribute('aria-expanded')).toBe(String(expanded));
+      expect(Boolean(panelRoot().querySelector('.body'))).toBe(expanded);
+    }
+    expect(loadTranscript).toHaveBeenCalledOnce();
+    expect(chrome.storage.local.set).not.toHaveBeenCalled();
+  });
+
+  it('stays collapsed when a transcript finishes loading and reuses it when reopened', async () => {
+    let resolveTranscript!: (value: RuntimeResponse<TranscriptResult>) => void;
+    const loadTranscript = vi.fn(() => new Promise<RuntimeResponse<TranscriptResult>>((resolve) => { resolveTranscript = resolve; }));
+    panel = new YoutubeTranscriptPanel({
+      loadContext: async () => successContext(context('Fixture')),
+      loadTranscript,
+    });
+    await startExpandedPanel();
+    panelRoot().querySelector<HTMLButtonElement>('.header-chevron')!.click();
+    expect(panelRoot().querySelector('.body')).toBeNull();
+
+    resolveTranscript(transcript('Completed while closed'));
+    await settle();
+    expect(panelRoot().querySelector('.body')).toBeNull();
+    expect(panelRoot().querySelector('.header')?.getAttribute('aria-expanded')).toBe('false');
+
+    panelRoot().querySelector<HTMLButtonElement>('.header')!.click();
+    expect(panelRoot().textContent).toContain('Completed while closed');
+    expect(loadTranscript).toHaveBeenCalledOnce();
+  });
+
+  it('does not restore a legacy open state over a click while storage is still loading', async () => {
+    let resolveStorage!: (value: Record<string, unknown>) => void;
+    vi.mocked(chrome.storage.local.get as (key: string) => Promise<Record<string, unknown>>)
+      .mockImplementation(() => new Promise((resolve) => { resolveStorage = resolve; }));
+    panel = new YoutubeTranscriptPanel({
+      loadContext: async () => successContext(context('Fixture')),
+      loadTranscript: async () => transcript('Hello'),
+    });
+    await startExpandedPanel();
+    panelRoot().querySelector<HTMLButtonElement>('.header-chevron')!.click();
+
+    resolveStorage({ youtubePanelExpanded: true, transcriptOutputFormat: 'detailed' });
+    await settle();
+    expect(panelRoot().querySelector('.body')).toBeNull();
+
+    panelRoot().querySelector<HTMLButtonElement>('.header')!.click();
+    expect(panelRoot().querySelector<HTMLSelectElement>('[aria-label="Định dạng xuất transcript"]')?.value).toBe('detailed');
+  });
+
   it('does not rebuild transcript rows for unrelated DOM mutations', async () => {
     panel = new YoutubeTranscriptPanel({
       loadContext: async () => successContext(context('Fixture')),
       loadTranscript: async () => transcript('Hello'),
     });
-    panel.start();
-    await settle();
+    await startExpandedPanel();
     const row = panelRoot().querySelector('[data-segment-index="0"]');
 
     document.body.append(document.createElement('aside'));
     await settle();
 
+    expect(row).not.toBeNull();
     expect(panelRoot().querySelector('[data-segment-index="0"]')).toBe(row);
   });
 
@@ -121,8 +196,7 @@ describe('YouTube panel lifecycle', () => {
       loadContext: async () => successContext(context('Fixture')),
       loadTranscript: async () => transcript('Hello'),
     });
-    panel.start();
-    await settle();
+    await startExpandedPanel();
     const host = document.getElementById('ezsubtitle-youtube-panel-host');
     const replacement = document.createElement('div');
     replacement.id = 'secondary-inner';
@@ -133,7 +207,7 @@ describe('YouTube panel lifecycle', () => {
     expect(document.querySelectorAll('#ezsubtitle-youtube-panel-host')).toHaveLength(1);
   });
 
-  it('clears old SPA state and ignores a transcript response from the previous navigation', async () => {
+  it('collapses on SPA navigation, ignores old responses, and waits for another click before loading', async () => {
     let resolveOld: ((value: RuntimeResponse<TranscriptResult>) => void) | undefined;
     let currentContext = context('Video A');
     const loadTranscript = vi.fn((videoId: string) => {
@@ -146,8 +220,7 @@ describe('YouTube panel lifecycle', () => {
       loadContext: async () => successContext(currentContext),
       loadTranscript,
     });
-    panel.start();
-    await settle();
+    await startExpandedPanel();
     currentContext = context('Video B');
     window.dispatchEvent(new Event('yt-navigate-finish'));
     expect(panelRoot().querySelector('.transcript')).toBeNull();
@@ -155,6 +228,12 @@ describe('YouTube panel lifecycle', () => {
     resolveOld?.(transcript('Old response'));
     await settle();
 
+    expect(panelRoot().querySelector('.body')).toBeNull();
+    expect(panelRoot().querySelector('.header')?.getAttribute('aria-expanded')).toBe('false');
+    expect(loadTranscript).toHaveBeenCalledOnce();
+
+    panelRoot().querySelector<HTMLButtonElement>('.header')!.click();
+    await settle();
     expect(panelRoot().textContent).toContain('Video B dQw4w9WgXcQ');
     expect(panelRoot().textContent).not.toContain('Old response');
   });
@@ -167,8 +246,7 @@ describe('YouTube panel lifecycle', () => {
         ? new Promise<RuntimeResponse<TranscriptResult>>((resolve) => { resolveEnglish = resolve; })
         : transcript('Vietnamese response'),
     });
-    panel.start();
-    await settle();
+    await startExpandedPanel();
     const select = panelRoot().querySelector<HTMLSelectElement>('select')!;
     select.value = '.vi';
     select.dispatchEvent(new Event('change'));
@@ -185,8 +263,7 @@ describe('YouTube panel lifecycle', () => {
       loadContext: async () => successContext(context('Fixture', [english])),
       loadTranscript: async () => transcript('Hello'),
     });
-    panel.start();
-    await settle();
+    await startExpandedPanel();
     const root = panelRoot();
     const video = document.querySelector<HTMLVideoElement>('video')!;
     video.currentTime = 1;
@@ -208,8 +285,7 @@ describe('YouTube panel lifecycle', () => {
       loadContext: async () => successContext(context('Fixture', [english])),
       loadTranscript: async () => multiTranscript(),
     });
-    panel.start();
-    await settle();
+    await startExpandedPanel();
     const root = panelRoot();
     const video = document.querySelector<HTMLVideoElement>('video')!;
     const scroller = root.querySelector<HTMLElement>('.transcript')!;
@@ -242,8 +318,7 @@ describe('YouTube panel lifecycle', () => {
       loadContext: async () => successContext(context('Fixture', [english])),
       loadTranscript,
     });
-    panel.start();
-    await settle();
+    await startExpandedPanel();
     const root = panelRoot();
     const firstRow = root.querySelector<HTMLButtonElement>('[data-segment-index="0"]')!;
 
@@ -274,8 +349,7 @@ describe('YouTube panel lifecycle', () => {
       loadContext: async () => successContext(context('Fixture', [english])),
       loadTranscript: async () => multiTranscript(),
     });
-    panel.start();
-    await settle();
+    await startExpandedPanel();
     const root = panelRoot();
     const input = root.querySelector<HTMLInputElement>('[aria-label="Tìm trong transcript"]')!;
     input.value = 'sentence';
@@ -296,8 +370,7 @@ describe('YouTube panel lifecycle', () => {
       loadContext: async () => successContext(context('Fixture', [english])),
       loadTranscript: async () => multiTranscript(),
     });
-    panel.start();
-    await settle();
+    await startExpandedPanel();
     const root = panelRoot();
     const header = root.querySelector('.header-row')!;
     const summary = root.querySelector<HTMLButtonElement>('.summary-button')!;
@@ -328,8 +401,7 @@ describe('YouTube panel lifecycle', () => {
       loadContext: async () => successContext(context('Fixture', [english])),
       loadTranscript: async () => multiTranscript(),
     });
-    panel.start();
-    await settle();
+    await startExpandedPanel();
     const root = panelRoot();
     const search = root.querySelector<HTMLInputElement>('[aria-label="Tìm trong transcript"]')!;
     search.value = 'sentence';

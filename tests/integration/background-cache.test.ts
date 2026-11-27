@@ -100,7 +100,7 @@ describe('background transcript cache ownership', () => {
     ) });
 
     await expect(handleFetchTranscript(videoId, track, sender)).resolves.toMatchObject({
-      ok: true, data: { provenance: { source: 'native-dom', cacheHit: false, fallbackErrors: ['CAPTION_UNAVAILABLE', 'EMPTY_RESPONSE'] } },
+      ok: true, data: { provenance: { source: 'native-dom', cacheHit: false, fallbackErrors: ['PLAYER_CC_UNAVAILABLE', 'CAPTION_UNAVAILABLE', 'EMPTY_RESPONSE'] } },
     });
     expect(storageSet).not.toHaveBeenCalled();
     await expect(handleFetchTranscript(videoId, track, sender)).resolves.toMatchObject({
@@ -113,6 +113,36 @@ describe('background transcript cache ownership', () => {
       ok: true, data: { segments: [{ startMs: 1_000, text: 'Fresh timedtext' }], provenance: { cacheHit: false } },
     });
     expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('uses captured player CC before successful metadata, upgrades a metadata cache hit, and keeps CC out of storage', async () => {
+    tabsGet.mockResolvedValue({ url: `https://www.youtube.com/watch?v=${videoId}` });
+    const transport = vi.fn(async () => json3('Metadata transcript'));
+    vi.stubGlobal('fetch', transport);
+    const player = transcriptResult([{ startMs: 1_100, text: 'Player transcript' }], videoId, track, 'player-timedtext');
+    tabsSendMessage.mockResolvedValueOnce({ ok: true, data: player });
+    await expect(handleFetchTranscript(videoId, track, sender)).resolves.toEqual({ ok: true, data: player });
+    expect(transport).not.toHaveBeenCalled();
+
+    await expect(handleFetchTranscript(videoId, track, sender)).resolves.toMatchObject({
+      ok: true, data: { provenance: { source: 'background-timedtext', cacheHit: false } },
+    });
+    tabsSendMessage.mockResolvedValue({ ok: true, data: player });
+    await expect(handleFetchTranscript(videoId, track, sender)).resolves.toEqual({ ok: true, data: player });
+    await expect(handleFetchTranscript(videoId, track, sender, undefined, undefined, true)).resolves.toEqual({ ok: true, data: player });
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(storageSet).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(storage)).not.toContain('Player transcript');
+  });
+
+  it('rejects stale probes before going to cache or metadata', async () => {
+    tabsGet.mockResolvedValue({ url: `https://www.youtube.com/watch?v=${videoId}` });
+    const transport = vi.fn(async () => json3('Metadata transcript'));
+    vi.stubGlobal('fetch', transport);
+    tabsSendMessage.mockResolvedValue({ ok: false, error: { code: 'STALE_VIDEO', message: 'Navigation' } });
+    await expect(handleFetchTranscript(videoId, track, sender)).resolves.toMatchObject({ ok: false, error: { code: 'STALE_VIDEO' } });
+    expect(storageSet).not.toHaveBeenCalled();
+    expect(transport).not.toHaveBeenCalled();
   });
 
   it.each(['lang=vi', 'lang=en&kind=asr', 'lang=en&lang=vi'])('rejects metadata when the selected track contradicts %s', async (query) => {

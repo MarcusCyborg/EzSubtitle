@@ -46,6 +46,10 @@ function requestPageBridge(
   data: Pick<PageBridgeRequest, 'videoId'>,
 ): Promise<PageBridgeResponse>;
 function requestPageBridge(
+  action: 'GET_PLAYER_TRANSCRIPT',
+  data: Pick<Extract<PageBridgeRequest, { action: 'GET_PLAYER_TRANSCRIPT' }>, 'track' | 'videoId'>,
+): Promise<PageBridgeResponse>;
+function requestPageBridge(
   action: 'FETCH_TIMEDTEXT',
   data: Pick<Extract<PageBridgeRequest, { action: 'FETCH_TIMEDTEXT' }>, 'baseUrl' | 'videoId'>,
 ): Promise<PageBridgeResponse>;
@@ -64,7 +68,7 @@ function requestPageBridge(
   return new Promise((resolve) => {
     const requestId = crypto.randomUUID();
     const request: PageBridgeRequest = { requestId, action, ...data } as PageBridgeRequest;
-    const timeoutMs = action === 'GET_SNAPSHOT'
+    const timeoutMs = action === 'GET_SNAPSHOT' || action === 'GET_PLAYER_TRANSCRIPT'
       ? 1_000
       : action === 'FETCH_NATIVE_TRANSCRIPT' ? NATIVE_BRIDGE_TIMEOUT_MS : PAGE_BRIDGE_TIMEOUT_MS;
     const cleanup = () => {
@@ -101,6 +105,20 @@ function requestPageBridge(
     window.addEventListener('yt-navigate-finish', onNavigation, { once: true });
     window.dispatchEvent(new CustomEvent(PAGE_REQUEST_EVENT, { detail: request }));
   });
+}
+
+async function getPlayerTranscript(videoId: string, track: CaptionTrack): Promise<RuntimeResponse<TranscriptResult>> {
+  const epoch = navigationEpoch;
+  const isCurrent = () => epoch === navigationEpoch && parseVideoId(window.location.href) === videoId;
+  const stale = () => failure('STALE_VIDEO', 'Video đã thay đổi khi đọc CC player.');
+  if (!isCurrent()) return stale();
+  if (!captionTrackMatchesVideo(track, videoId)) return failure('INVALID_CAPTION_URL', 'Đường dẫn không khớp video hoặc track phụ đề.');
+  const response = await requestPageBridge('GET_PLAYER_TRANSCRIPT', { videoId, track });
+  if (!isCurrent() || (!response.ok && response.error.code === 'STALE_VIDEO')) return stale();
+  if (!response.ok || response.action !== 'GET_PLAYER_TRANSCRIPT') return failure('PLAYER_CC_UNAVAILABLE', 'Chưa có CC player phù hợp.');
+  const data = transcriptResult(response.data.segments, videoId, track, 'player-timedtext');
+  data.provenance.fetchedAt = response.data.observedAt;
+  return { ok: true, data };
 }
 
 async function getPlayerSnapshot(videoId: string): Promise<unknown | null> {
@@ -257,12 +275,15 @@ export default defineContentScript({
         void getVideoContext().then(sendResponse);
         return true;
       }
-      if (message?.type === 'FETCH_PAGE_TRANSCRIPT') {
+      if (message?.type === 'GET_PLAYER_TRANSCRIPT' || message?.type === 'FETCH_PAGE_TRANSCRIPT') {
         if (!isCaptionTrack(message.track)) {
           sendResponse(failure('INVALID_REQUEST', 'Yêu cầu lấy phụ đề không hợp lệ.'));
           return;
         }
-        void fetchPageTranscript(message.videoId, message.track, message.trackCount).then(sendResponse)
+        const response = message.type === 'GET_PLAYER_TRANSCRIPT'
+          ? getPlayerTranscript(message.videoId, message.track)
+          : fetchPageTranscript(message.videoId, message.track, message.trackCount);
+        void response.then(sendResponse)
           .catch(() => sendResponse(failure('UNEXPECTED_ERROR', 'Không thể đọc transcript từ trang YouTube.')));
         return true;
       }

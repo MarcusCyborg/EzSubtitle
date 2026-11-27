@@ -18,6 +18,7 @@ export function transcriptResult(
 }
 
 const labels: Record<TranscriptSource, string> = {
+  'player-timedtext': 'CC player',
   'background-timedtext': 'Track phụ đề (extension)',
   'page-timedtext': 'Track phụ đề (trang YouTube)',
   youtubei: 'Bản chép lời YouTube (API)',

@@ -1,21 +1,24 @@
 import type { TimedTextBody } from '../transcript/fetch-transcript';
-import type { TranscriptSegment } from '../../types/transcript';
+import type { CaptionTrack, TranscriptSegment } from '../../types/transcript';
+import { isCaptionTrack } from './caption-tracks';
 
 export const PAGE_REQUEST_EVENT = 'ezsubtitle:page-request';
 export const PAGE_RESPONSE_EVENT = 'ezsubtitle:page-response';
 
-export type PageBridgeAction = 'GET_SNAPSHOT' | 'FETCH_TIMEDTEXT' | 'FETCH_TRANSCRIPT_ENDPOINT' | 'FETCH_NATIVE_TRANSCRIPT';
+export type PageBridgeAction = 'GET_SNAPSHOT' | 'GET_PLAYER_TRANSCRIPT' | 'FETCH_TIMEDTEXT' | 'FETCH_TRANSCRIPT_ENDPOINT' | 'FETCH_NATIVE_TRANSCRIPT';
 
 export type PageBridgeTrack = { id: string; languageCode: string; label: string };
 
 export type PageBridgeRequest =
   | { requestId: string; action: 'GET_SNAPSHOT'; videoId: string }
+  | { requestId: string; action: 'GET_PLAYER_TRANSCRIPT'; videoId: string; track: CaptionTrack }
   | { requestId: string; action: 'FETCH_TIMEDTEXT'; videoId: string; baseUrl: string }
   | { requestId: string; action: 'FETCH_TRANSCRIPT_ENDPOINT'; videoId: string; track: PageBridgeTrack }
   | { requestId: string; action: 'FETCH_NATIVE_TRANSCRIPT'; videoId: string; track: PageBridgeTrack; isOnlyTrack: boolean };
 
 export type PageBridgeSuccess =
   | { requestId: string; action: 'GET_SNAPSHOT'; ok: true; data: { snapshot: unknown } }
+  | { requestId: string; action: 'GET_PLAYER_TRANSCRIPT'; ok: true; data: { segments: TranscriptSegment[]; observedAt: number } }
   | { requestId: string; action: 'FETCH_TIMEDTEXT'; ok: true; data: { bodies: TimedTextBody[]; networkFailure: boolean } }
   | { requestId: string; action: 'FETCH_TRANSCRIPT_ENDPOINT'; ok: true; data: { body: string } }
   | { requestId: string; action: 'FETCH_NATIVE_TRANSCRIPT'; ok: true; data: { segments: TranscriptSegment[] } };
@@ -39,6 +42,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isAction(value: unknown): value is PageBridgeAction {
   return value === 'GET_SNAPSHOT'
+    || value === 'GET_PLAYER_TRANSCRIPT'
     || value === 'FETCH_TIMEDTEXT'
     || value === 'FETCH_TRANSCRIPT_ENDPOINT'
     || value === 'FETCH_NATIVE_TRANSCRIPT';
@@ -47,6 +51,9 @@ function isAction(value: unknown): value is PageBridgeAction {
 export function isPageBridgeRequest(value: unknown): value is PageBridgeRequest {
   if (!isRecord(value) || typeof value.requestId !== 'string' || !REQUEST_ID.test(value.requestId) || !isAction(value.action)) return false;
   if (typeof value.videoId !== 'string' || !VIDEO_ID.test(value.videoId)) return false;
+  if (value.action === 'GET_PLAYER_TRANSCRIPT') return isRecord(value.track)
+    && typeof value.track.baseUrl === 'string' && value.track.baseUrl.length <= 8_000
+    && isCaptionTrack(value.track);
   if (value.action === 'FETCH_TIMEDTEXT') return typeof value.baseUrl === 'string' && value.baseUrl.length <= 8_000;
   if (value.action === 'FETCH_TRANSCRIPT_ENDPOINT' || value.action === 'FETCH_NATIVE_TRANSCRIPT') {
     const validTrack = isRecord(value.track)
@@ -121,6 +128,8 @@ export function isPageBridgeResponse(
   }
   if (!isRecord(value.data)) return false;
   if (action === 'GET_SNAPSHOT') return isMinimalSnapshot(value.data.snapshot);
+  if (action === 'GET_PLAYER_TRANSCRIPT') return isTranscriptSegments(value.data.segments) && value.data.segments.length > 0
+    && typeof value.data.observedAt === 'number' && Number.isFinite(value.data.observedAt) && value.data.observedAt > 0;
   if (action === 'FETCH_TIMEDTEXT') return isTimedTextBodies(value.data.bodies) && typeof value.data.networkFailure === 'boolean';
   if (action === 'FETCH_TRANSCRIPT_ENDPOINT') return typeof value.data.body === 'string' && value.data.body.length <= MAX_BODY_LENGTH;
   return isTranscriptSegments(value.data.segments);

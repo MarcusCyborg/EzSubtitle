@@ -8,7 +8,7 @@ type CacheRecord = {
   identity: string;
 } & CachedTranscript;
 
-export const TRANSCRIPT_CACHE_SCHEMA = 3;
+export const TRANSCRIPT_CACHE_SCHEMA = 4;
 export const TRANSCRIPT_CACHE_TTL_MS = 30 * 60 * 1000;
 
 function identityHash(value: string): string {

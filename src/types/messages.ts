@@ -9,6 +9,7 @@ export type RuntimeRequest =
 
 export type ContentRequest =
   | { type: 'GET_VIDEO_CONTEXT' }
+  | { type: 'GET_PLAYER_TRANSCRIPT'; videoId: string; track: CaptionTrack }
   | { type: 'FETCH_PAGE_TRANSCRIPT'; videoId: string; track: CaptionTrack; trackCount?: number };
 
 export type RuntimeSuccess<T> = { ok: true; data: T };
@@ -21,7 +22,7 @@ export type TranscriptResult = {
   provenance: TranscriptProvenance;
 };
 
-export type TranscriptSource = 'background-timedtext' | 'page-timedtext' | 'youtubei' | 'native-dom';
+export type TranscriptSource = 'player-timedtext' | 'background-timedtext' | 'page-timedtext' | 'youtubei' | 'native-dom';
 
 export type TranscriptProvenance = {
   source: TranscriptSource;
